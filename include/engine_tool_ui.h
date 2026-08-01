@@ -8,7 +8,7 @@ class ENGINE_API UIFont {
 
 class ENGINE_API ToolUI {
 public:
-	static void Begin(const char* name);
+	static void Begin(const char* name, bool borderless = false);
 	static void End();
 	static bool Button(const char* text);
 	static bool Button(const char* text, Vector2 size);
@@ -22,4 +22,5 @@ public:
 	static void AddFontFromFileTTF(UIFont& font, const char* fontName, float size);
 	static void PushFont(UIFont& font);
 	static void PopFont();
+	static bool InputTextMultiline(const char* label, std::string& str);
 };
