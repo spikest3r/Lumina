@@ -1,18 +1,55 @@
 #include "freeplay.h"
 #include <iostream>
 #include <engine_tool_ui.h>
+#include <shapes.h>
 
 #include "lumen-inc/compiler.h"
 #include "lumen-inc/vm.h"
 #include "lumen-inc/programfile.h"
 
+#include "helpers.h"
+#include "objects.h"
+
 constexpr Vector2 toolbarButtonSize = {110,50};
+
+static Transform baseTransform = {
+    {0.0f,0.0f,0.0f},
+    {0.0f,0.0f,0.0f,0.0f},
+    {1.0f,1.0f,1.0f}
+};
+
+void ComputeOrbitCamera(float yawDegrees, float pitchDegrees, float distance,
+                         Vector3& outPosition, Vector3& outRotation) {
+    float yaw   = yawDegrees   * (3.14159265358979323846f / 180.0f);
+    float pitch = pitchDegrees * (3.14159265358979323846f / 180.0f);
+
+    // Direction the camera is FACING (toward origin)
+    Vector3 front;
+    front.x = cosf(yaw) * cosf(pitch);
+    front.y = sinf(yaw) * cosf(pitch);
+    front.z = sinf(pitch);
+
+    // Camera sits on the opposite side of that direction, at `distance`
+    outPosition.x = -front.x * distance;
+    outPosition.y = -front.y * distance;
+    outPosition.z = -front.z * distance;
+
+    outRotation.x = pitchDegrees;
+    outRotation.y = yawDegrees;
+    outRotation.z = 0.0f;
+}
 
 void FreeplayScene::InitScene(Engine* engine) {
     engine->SetUICallback([this](Engine* engine)
     {
         this->UICallback(engine);
     });
+
+    baseMaterial = engine->createPhysicsMaterial(0.5f,0.5f,0.5f);
+
+    constructGameObjects(engine);
+
+    ComputeOrbitCamera(135.0f, -30.0f, 25.0f, engine->cameraPosition, engine->cameraRotation);
 
     std::cout << "Freeplay scene loaded\n";
 }
@@ -24,7 +61,22 @@ void FreeplayScene::UICallback(Engine* engine) {
     ToolUI::SetNextWindowSize({extents.x, 70});
     ToolUI::Begin("##toolbar", true);
     if(ToolUI::Button("Run", toolbarButtonSize)) {
-        requestRun();
+        CompilerData data;
+        int status = compile(sourceCode, &data);
+        if(status != 0) {
+            std::cout << "Failed to compile\n";
+        } else {
+            playerPuppet->program.bytecode = std::move(data.bytecode);
+            playerPuppet->program.stringPool = std::move(data.stringPool);
+            playerPuppet->program.constPool = std::move(data.constPool);
+            playerPuppet->program.variableCount = data.variableCount;
+
+            for(auto& object: objects) {
+                object->resetVM();
+            }
+            
+            running = true;
+        }
     }
     ToolUI::SameLine();
     if(ToolUI::Button("Button2", toolbarButtonSize)) {
@@ -38,25 +90,13 @@ void FreeplayScene::UICallback(Engine* engine) {
 }
 
 void FreeplayScene::UpdateScene(Engine* engine) {
-    if(shouldRun) {
-        shouldRun = false;
+    float dt = engine->getDeltaTime();
 
-        CompilerData data;
-        int status = compile(sourceCode, &data);
-        if(status != 0) {
-            std::cout << "Failed to compile\n";
-        } else {
-            VMProgramData progData;
-            progData.bytecode = std::move(data.bytecode);
-            progData.stringPool = std::move(data.stringPool);
-            progData.constPool = std::move(data.constPool);
-            progData.variableCount = data.variableCount;
-            int status2 = run(&progData);
-            if(status2 != 0) {
-                std::cout << "Execution error has occured!\n";
-            } else {
-                std::cout << "Executed\n";
-            }
+    // TODO: Into scene graph
+    if(running) {
+        for(auto& object: objects) {
+            object->stepVM();
+            UpdateGoToPos(object, object->goToState, dt);
         }
     }
 }
@@ -65,9 +105,28 @@ void FreeplayScene::DestroyScene(Engine* engine) {
 
 }
 
-void FreeplayScene::requestRun() {
-    if(!shouldRun) shouldRun = true;
-    else {
-        std::cout << "already running\n";
-    }
+void FreeplayScene::constructGameObjects(Engine* engine) {
+    // TODO: temporary floor
+    Texture* texture = engine->createTexture("white", "assets/textures/white.png");
+    Mesh* planeMesh = engine->createMesh("plane", planeVertices, planeIndices);
+    auto planeTrans = baseTransform;
+    planeTrans.scale = {10.0f, 10.0f, 1.0f};
+    plane = engine->createGameObject<GameObject>(
+        planeTrans, planeMesh, texture, baseMaterial, false
+    );
+
+    // load puppet
+    Texture* puppetTexture = engine->createTexture("puppetTexture", "assets/textures/puppet.png");
+    Mesh* puppetMesh = engine->createMesh("puppetMesh", "assets/models/puppet.obj");
+    objectPool["puppet"] = {puppetMesh, puppetTexture};
+
+    // create player puppet
+    auto puppetTransform = baseTransform;
+    puppetTransform.scale = {0.3f, 0.3f, 0.3f};
+    puppetTransform.position.z = 0.2f; // TODO
+    playerPuppet = engine->createGameObject<Puppet>(
+        puppetTransform, puppetMesh, puppetTexture, baseMaterial, false
+    );
+    sceneObjects["player"] = playerPuppet;
+    objects.push_back(playerPuppet);
 }

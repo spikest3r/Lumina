@@ -1,4 +1,7 @@
 #include "helpers.h"
+#include "httplib.h"
+#include "compiler.h"
+#include "types.h"
 
 // Splits a full URL like "http://host:port/path" into scheme+host and path.
 bool splitUrl(const std::string& url, std::string& hostPart, std::string& pathPart) {

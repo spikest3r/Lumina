@@ -1,6 +1,9 @@
 #pragma once
 #include "includes.h"
 
+// from objects.h
+class InteractiveObject;
+
 typedef enum {
     TAG_INT = 2,
     TAG_FLOAT = 3,
@@ -32,6 +35,9 @@ struct VMExecutionData {
     int PC = 0;
     int routineBase = 0;
     bool halt = false;
+
+    bool suspended = false;
+    InteractiveObject* self;
 };
 
 typedef enum {

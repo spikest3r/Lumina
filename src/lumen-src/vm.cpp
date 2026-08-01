@@ -25,33 +25,6 @@ bool isFloatVariant(const Variant& a, const Variant& b) {
     return a.type == TAG_FLOAT || b.type == TAG_FLOAT;
 }
 
-int run(
-    VMProgramData* progData
-) {
-    VMExecutionData execData;
-    execData.PC = 0;
-    execData.routineBase = 0;
-
-    execData.variables.resize(progData->variableCount);
-
-    while(true) {
-        auto opcode = progData->bytecode[execData.PC];
-        int offset = getOpCodeOffset(opcode);
-        
-        try {
-            int result = execute(progData, &execData);
-        } catch(...) {
-            execData.halt = true;
-            return -1;
-        }
-
-        if(execData.halt || result == -1) 
-            break;
-        execData.PC = result;
-    }
-    return 0;
-}
-
 int execute(
     VMProgramData* progData,
     VMExecutionData* execData
@@ -143,7 +116,7 @@ int execute(
         auto it = funcMap.find(functionIndex);
         if (it != funcMap.end()) {
             try {
-                it->second(execData->stack, execData->variables);
+                it->second(*execData);
             } catch(std::exception& s) {
                 std::cerr << "Function error\n" << s.what() << std::endl;
                 execData->halt = true;
