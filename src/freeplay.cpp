@@ -14,7 +14,7 @@ constexpr Vector2 toolbarButtonSize = {110,50};
 
 static Transform baseTransform = {
     {0.0f,0.0f,0.0f},
-    {0.0f,0.0f,0.0f,0.0f},
+    {0.0f,0.0f,0.0f,1.0f},
     {1.0f,1.0f,1.0f}
 };
 
@@ -37,6 +37,39 @@ void ComputeOrbitCamera(float yawDegrees, float pitchDegrees, float distance,
     outRotation.x = pitchDegrees;
     outRotation.y = yawDegrees;
     outRotation.z = 0.0f;
+}
+
+void ApplyFakeGravity(GameObject* obj, Engine* engine, float dt, float fallSpeed = 9.8f, float groundOffset = 0.05f)
+{
+    Vector3 pos = obj->transform.position;
+    Vector3 down = { 0.0f, 0.0f, -1.0f };
+
+    RaycastHit hit = engine->raycast(pos, down, 100.0f);
+
+    if (hit.object != nullptr)
+    {
+        float groundZ = pos.z - hit.distance;
+        float distToGround = pos.z - groundZ;
+
+        if (distToGround > groundOffset)
+        {
+            float fallStep = fallSpeed * dt;
+
+            if (fallStep > distToGround - groundOffset)
+                fallStep = distToGround - groundOffset;
+
+            obj->transform.position.z -= fallStep;
+        }
+        else
+        {
+            obj->transform.position.z = groundZ + groundOffset;
+        }
+    }
+    else
+    {
+        // No ground found — keep falling
+        obj->transform.position.z -= fallSpeed * dt;
+    }
 }
 
 void FreeplayScene::InitScene(Engine* engine) {
@@ -96,9 +129,11 @@ void FreeplayScene::UpdateScene(Engine* engine) {
     if(running) {
         for(auto& object: objects) {
             object->stepVM();
-            UpdateGoToPos(object, object->goToState, dt);
+            UpdateGoToPos(object, object->goToState, dt, engine);
         }
     }
+
+    ApplyFakeGravity(playerPuppet, engine, dt);
 }
 
 void FreeplayScene::DestroyScene(Engine* engine) {
@@ -106,11 +141,9 @@ void FreeplayScene::DestroyScene(Engine* engine) {
 }
 
 void FreeplayScene::constructGameObjects(Engine* engine) {
-    // TODO: temporary floor
     Texture* texture = engine->createTexture("white", "assets/textures/white.png");
-    Mesh* planeMesh = engine->createMesh("plane", planeVertices, planeIndices);
+    Mesh* planeMesh = engine->createMesh("plane", "assets/models/floor.obj");
     auto planeTrans = baseTransform;
-    planeTrans.scale = {10.0f, 10.0f, 1.0f};
     plane = engine->createGameObject<GameObject>(
         planeTrans, planeMesh, texture, baseMaterial, false
     );
@@ -122,8 +155,7 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
 
     // create player puppet
     auto puppetTransform = baseTransform;
-    puppetTransform.scale = {0.3f, 0.3f, 0.3f};
-    puppetTransform.position.z = 0.2f; // TODO
+    puppetTransform.position.z = 10.0f;
     playerPuppet = engine->createGameObject<Puppet>(
         puppetTransform, puppetMesh, puppetTexture, baseMaterial, false
     );

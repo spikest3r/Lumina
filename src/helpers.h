@@ -21,4 +21,6 @@ struct GoToPosState {
 void GoToPos(GameObject* obj, GoToPosState& state, Vector3 target,
              std::function<void(GoToPosResult)> callback);
 
-void UpdateGoToPos(GameObject* obj, GoToPosState& state, float dt);
+
+void UpdateGoToPos(GameObject* obj, GoToPosState& state, float dt, Engine* engine,
+                   float stopDistance = 0.5f);

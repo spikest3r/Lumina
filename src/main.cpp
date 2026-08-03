@@ -12,8 +12,8 @@ int main() {
     engine->loadScene(freeplayScene);
     
     while (engine->running()) {
+        engine->update();
 		engine->updateScene();
-		engine->update();
 
 		engine->render();
     }

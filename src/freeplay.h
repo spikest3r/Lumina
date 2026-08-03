@@ -11,9 +11,6 @@ struct ObjectData {
 };
 
 class FreeplayScene : public Scene {
-public:
-    // VM commands
-    void goToPos(std::string objectName, Vector3 location);
 protected:
     void InitScene(Engine* engine) override;
     void UpdateScene(Engine* engine) override;
