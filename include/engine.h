@@ -43,6 +43,7 @@ public:
 	ENGINE_API KeyState getMouseButton(MouseButton button);
 
 	ENGINE_API Vector2 getMousePos();
+	ENGINE_API void getMouseRay(Vector3& origin, Vector3& direction);
 
 	Vector3 cameraPosition = { 0.0f, 0.0f, 5.0f }; // Start 5 units back
 	Vector3 cameraRotation = { 0.0f, -90.0f, 0.0f }; // Point toward the scene
@@ -83,6 +84,8 @@ public:
 	ENGINE_API void updateScene();
 
 	ENGINE_API void setLightPosition(Vector3 pos);
+
+	ENGINE_API void setGroundPlaneActive(bool active);
 
 	ENGINE_API UIElement* createUIElement(Texture* texture, Vector2 pos, Vector2 size);
 
