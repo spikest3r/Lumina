@@ -26,21 +26,25 @@ T lerp(T a, T b, float t)
     return a + (b - a) * t;
 }
 
-void ComputeOrbitCamera(float yawDegrees, float pitchDegrees, float distance,
-                         Vector3& outPosition, Vector3& outRotation) {
+void ComputeOrbitCamera(Vector3 currentPosition,
+                        float yawDegrees,
+                        float pitchDegrees,
+                        float distance,
+                        Vector3& outPosition,
+                        Vector3& outRotation)
+{
     float yaw   = yawDegrees   * (3.14159265358979323846f / 180.0f);
     float pitch = pitchDegrees * (3.14159265358979323846f / 180.0f);
 
-    // Direction the camera is FACING (toward origin)
     Vector3 front;
     front.x = cosf(yaw) * cosf(pitch);
     front.y = sinf(yaw) * cosf(pitch);
     front.z = sinf(pitch);
 
-    // Camera sits on the opposite side of that direction, at `distance`
-    outPosition.x = -front.x * distance;
-    outPosition.y = -front.y * distance;
-    outPosition.z = -front.z * distance;
+    // Orbit around currentPosition
+    outPosition.x = currentPosition.x - front.x * distance;
+    outPosition.y = currentPosition.y - front.y * distance;
+    outPosition.z = currentPosition.z - front.z * distance;
 
     outRotation.x = pitchDegrees;
     outRotation.y = yawDegrees;
@@ -91,7 +95,7 @@ void FreeplayScene::InitScene(Engine* engine) {
 
     constructGameObjects(engine);
 
-    ComputeOrbitCamera(135.0f, -30.0f, 25.0f, engine->cameraPosition, engine->cameraRotation);
+    ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
 }
 
 void FreeplayScene::UICallback(Engine* engine) {
@@ -165,6 +169,13 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 eraseBrush = true;
                 brushObject->transform.scale = {0.0f,0.0f,0.0f};
             }
+        }
+    }
+
+    if(!activeBrush && !lastBrushName.empty()) {
+        if(engine->getKey(KeyCode::Q) == PRESS) {
+            createBrush(lastBrushName, engine);
+            setToolbarActive(false);
         }
     }
 
@@ -276,6 +287,73 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             brushObjectData = nullptr;
             setToolbarActive(true);
         }
+    } else {
+        // rotate camera with mouse buttons
+        static bool wasHeldLeft = false;
+        static bool wasHeldRight = false;
+        static Vector2 lastMousePosLeft;
+        static Vector2 lastMousePosRight;
+
+        bool heldLeft = engine->getMouseButton(MouseButton::Left) == PRESS;
+        bool heldRight = engine->getMouseButton(MouseButton::Right) == PRESS;
+
+        // orbit
+        if (heldLeft && !heldRight)
+        {
+            Vector2 mousePos = engine->getMousePos();
+
+            if (!wasHeldLeft)
+                lastMousePosLeft = mousePos;
+
+            Vector2 delta = mousePos - lastMousePosLeft;
+
+            cameraYaw   += -delta.x * sensitivity;
+            cameraPitch -= delta.y * sensitivity;
+
+            cameraPitch = std::clamp(cameraPitch, -89.0f, 89.0f);
+
+            lastMousePosLeft = mousePos;
+        }
+
+        // zoom
+        float scrollDelta = engine->getScrollDelta();
+
+        if (scrollDelta != 0.0f)
+        {
+            cameraDist -= scrollDelta * zoomSensitivity;
+            cameraDist = std::clamp(cameraDist, 1.0f, 100.0f);
+        }
+
+        // pan
+        if (heldRight && !heldLeft)
+        {
+            Vector2 mousePos = engine->getMousePos();
+
+            if (!wasHeldRight)
+                lastMousePosRight = mousePos;
+
+            Vector2 delta = mousePos - lastMousePosRight;
+
+            const float sensitivity = 0.01f;
+
+            constexpr Vector3 up = {0.0f,0.0f,1.0f}; // Z+ up
+            Vector3 forward, right;
+            engine->getCameraVectors(forward, right);
+
+            cameraTarget =
+                cameraTarget
+                - right * (delta.x * sensitivity)
+                + up    * (delta.y * sensitivity);
+
+            lastMousePosRight = mousePos;
+        }
+
+        if(heldLeft || heldRight || scrollDelta != 0.0f) {
+            ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
+        }
+
+        wasHeldLeft = heldLeft;
+        wasHeldRight = heldRight;
     }
 
     if(running) {
@@ -343,6 +421,7 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
         if(it == objectPool.end()) {
             throw std::runtime_error("Unknown brush \'" + name + "\'");
         }
+        lastBrushName = name;
     }
 
     if(brushObject) {

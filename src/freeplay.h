@@ -37,6 +37,15 @@ protected:
     void InitScene(Engine* engine) override;
     void UpdateScene(Engine* engine) override;
     void DestroyScene(Engine* engine) override;
+
+    Vector3 cameraTarget = {0.0f,0.0f,0.0f};
+    float cameraPitch = -25.0f;
+    float cameraYaw = 135.0f;
+    float cameraDist = 25.0f;
+
+    // TODO: expose sensitivity in settings
+    float sensitivity = 0.15f;
+    float zoomSensitivity = 0.4f;
     
     virtual void UICallback(Engine* engine);
 
@@ -60,6 +69,7 @@ protected:
     bool eraseBrush = false;
     GameObject* brushObject;
     ObjectData* brushObjectData;
+    std::string lastBrushName = "";
     Texture* redTexture; // for illegal placements
     bool brushUsesRedTexture = false;
     int brushZ = 0;
