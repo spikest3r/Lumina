@@ -57,10 +57,12 @@ protected:
     
     bool addObjectMenu = false;
     bool activeBrush = false;
+    bool eraseBrush = false;
     GameObject* brushObject;
     ObjectData* brushObjectData;
     Texture* redTexture; // for illegal placements
     bool brushUsesRedTexture = false;
+    int brushZ = 0;
 
     int objectIndex = 0;
     std::string getUniqueObjectName();

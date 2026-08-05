@@ -12,6 +12,8 @@
 
 constexpr Vector2 toolbarButtonSize = {110,50};
 
+#define MAX_WORLD_HEIGHT 4
+
 static Transform baseTransform = {
     {0.0f,0.0f,0.0f},
     {0.0f,0.0f,0.0f,1.0f},
@@ -130,6 +132,10 @@ void FreeplayScene::UICallback(Engine* engine) {
     // add object panel
     if(addObjectMenu && !activeBrush) {
         ToolUI::Begin("Add object");
+        if(ToolUI::Button("Eraser")) {
+            createBrush("erase", engine);
+            setToolbarActive(false);
+        }
         if(ToolUI::Button("Block")) {
             createBrush("block", engine);
             setToolbarActive(false);
@@ -150,6 +156,18 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         }
     }
 
+    if(!eraseBrush) {
+        if(engine->getKey(KeyCode::E) == PRESS) {
+            if(!activeBrush) {
+                createBrush("erase", engine);
+                setToolbarActive(false);
+            } else {
+                eraseBrush = true;
+                brushObject->transform.scale = {0.0f,0.0f,0.0f};
+            }
+        }
+    }
+
     if(activeBrush) {
         Vector3 origin;
         Vector3 direction;
@@ -166,17 +184,38 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
                 constexpr float grid = 2.0f;
 
+                int scrollDelta = std::round(engine->getScrollDelta());
+
                 hit.x = std::round(hit.x / grid) * grid;
                 hit.y = std::round(hit.y / grid) * grid;
-                hit.z = 0.0f;
 
                 GridPos gp;
                 gp.x = static_cast<int>(hit.x);
                 gp.y = static_cast<int>(hit.y);
-                gp.z = static_cast<int>(hit.z);
+
+                if (scrollDelta < 0) // scroll down
+                {
+                    if (brushZ > 0)
+                        brushZ--;
+                }
+                else if (scrollDelta > 0) // scroll up
+                {
+                    gp.z = brushZ;
+                    bool currentOccupied = occupiedCells.contains(gp);
+
+                    gp.z = brushZ + 1;
+                    bool aboveOccupied = (brushZ + 1 <= MAX_WORLD_HEIGHT) && occupiedCells.contains(gp);
+
+                    if ((currentOccupied || aboveOccupied) && brushZ < MAX_WORLD_HEIGHT)
+                        brushZ++;
+                }
+
+                brushZ = std::clamp(brushZ, 0, MAX_WORLD_HEIGHT);
+
+                hit.z = static_cast<float>(brushZ) * grid;
+                gp.z = brushZ;
 
                 brushObject->transform.position = hit;
-                // TODO/FIXME: Implicit convertation not allowed
                 bool occupied = occupiedCells.contains(gp);
                 if(occupied) {
                     if(!brushUsesRedTexture) {
@@ -187,13 +226,20 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 } else {
                     if(brushUsesRedTexture) {
                         brushUsesRedTexture = false;
-                        brushObject->transform.scale = {1.0f, 1.0f, 1.0f};
-                        brushObject->updateTexture(brushObjectData->texture);
+                        if(!eraseBrush)
+                            brushObject->transform.scale = {1.0f, 1.0f, 1.0f};
+                        else
+                            brushObject->transform.scale = {0.0f,0.0f,0.0f};
+                        if(brushObjectData)
+                            brushObject->updateTexture(brushObjectData->texture);
                     }
                 }
 
+                auto placeButton = MouseButton::Left;
+                auto deleteButton = eraseBrush ? MouseButton::Left : MouseButton::Right;
+
                 if(engine->isLastFrame()) {
-                    if(!occupied && engine->getMouseButton(MouseButton::Left) == PRESS) {
+                    if(!eraseBrush && !occupied && engine->getMouseButton(placeButton) == PRESS) {
                         // TODO: class for block
                         auto objectTrans = baseTransform;
                         objectTrans.position = hit;
@@ -207,7 +253,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         sceneObjects[name] = newObject;
                         objects.push_back(newObject);
                         occupiedCells[gp] = name;
-                    } else if(occupied && engine->getMouseButton(MouseButton::Right) == PRESS) {
+                    } else if(occupied && engine->getMouseButton(deleteButton) == PRESS) {
                         auto name = occupiedCells[gp];
                         auto object = sceneObjects[name];
                         
@@ -224,6 +270,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
         if(engine->getKey(KeyCode::Escape) == PRESS) {
             activeBrush = false;
+            eraseBrush = false;
             engine->requestDestroyGameObject(brushObject);
             brushObject = nullptr;
             brushObjectData = nullptr;
@@ -288,9 +335,14 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
 }
 
 void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
-    auto it = objectPool.find(name);
-    if(it == objectPool.end()) {
-        throw std::runtime_error("Unknown brush \'" + name + "\'");
+    eraseBrush = name == "erase";
+
+    std::unordered_map<std::string, ObjectData>::iterator it;
+    if(!eraseBrush) {
+        it = objectPool.find(name);
+        if(it == objectPool.end()) {
+            throw std::runtime_error("Unknown brush \'" + name + "\'");
+        }
     }
 
     if(brushObject) {
@@ -298,15 +350,27 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
         std::cout << "Brush already exists. Previous one IS NOT DESTROYED\n";
     }
 
-    brushObjectData = &objectPool[name];
+    Mesh* objectMesh = nullptr;
+    Texture* objectTexture = nullptr;
 
-    auto objectMesh = it->second.mesh;
-    auto objectTexture = it->second.texture;
+    if(!eraseBrush) {
+        brushObjectData = &objectPool[name];
+
+        objectMesh = it->second.mesh;
+        objectTexture = it->second.texture;
+    } else {
+        objectMesh = objectPool["block"].mesh;
+        objectTexture = redTexture;
+    }
     
     brushObject = engine->createGameObject<GameObject>(
         baseTransform, objectMesh, objectTexture, baseMaterial, false
     );
     brushObject->tag = "Brush";
+
+    if(eraseBrush) {
+        brushObject->transform.scale = {0.0f,0.0f,0.0f};
+    }
 
     activeBrush = true;
 }

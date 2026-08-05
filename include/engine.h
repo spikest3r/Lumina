@@ -44,6 +44,7 @@ public:
 
 	ENGINE_API Vector2 getMousePos();
 	ENGINE_API void getMouseRay(Vector3& origin, Vector3& direction);
+	ENGINE_API float getScrollDelta();
 
 	Vector3 cameraPosition = { 0.0f, 0.0f, 5.0f }; // Start 5 units back
 	Vector3 cameraRotation = { 0.0f, -90.0f, 0.0f }; // Point toward the scene
