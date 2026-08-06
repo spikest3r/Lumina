@@ -95,6 +95,10 @@ void FreeplayScene::InitScene(Engine* engine) {
 
     constructGameObjects(engine);
 
+    brushMoveSound = engine->createSound("brushMove", "assets/sounds/move.wav", false, true);
+    brushPlaceSound = engine->createSound("brushPlace", "assets/sounds/place.wav", false, true);
+    brushDeleteSound = engine->createSound("brushDelete", "assets/sounds/delete-PREVIEW.wav", false, true);
+
     ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
 }
 
@@ -227,6 +231,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 gp.z = brushZ;
 
                 brushObject->transform.position = hit;
+
                 bool occupied = occupiedCells.contains(gp);
                 if(occupied) {
                     if(!brushUsesRedTexture) {
@@ -249,8 +254,16 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 auto placeButton = MouseButton::Left;
                 auto deleteButton = eraseBrush ? MouseButton::Left : MouseButton::Right;
 
+                bool placeBtnPress = engine->getMouseButton(placeButton) == PRESS;
+                bool deleteBtnPress = engine->getMouseButton(deleteButton) == PRESS;
+
+                if(gp != prevGP && (!placeBtnPress && !deleteBtnPress) && (!eraseBrush || occupied)) {
+                    brushObject->playSound(brushMoveSound, 1.0f);
+                }
+                prevGP = gp;
+
                 if(engine->isLastFrame()) {
-                    if(!eraseBrush && !occupied && engine->getMouseButton(placeButton) == PRESS) {
+                    if(!eraseBrush && !occupied && placeBtnPress) {
                         // TODO: class for block
                         auto objectTrans = baseTransform;
                         objectTrans.position = hit;
@@ -264,7 +277,9 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         sceneObjects[name] = newObject;
                         objects.push_back(newObject);
                         occupiedCells[gp] = name;
-                    } else if(occupied && engine->getMouseButton(deleteButton) == PRESS) {
+
+                        brushObject->playSound(brushPlaceSound, 1.0f);
+                    } else if(occupied && deleteBtnPress) {
                         auto name = occupiedCells[gp];
                         auto object = sceneObjects[name];
                         
@@ -274,6 +289,8 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
                         auto it = std::find(objects.begin(), objects.end(), object);
                         if(it != objects.end()) objects.erase(it);
+
+                        brushObject->playSound(brushDeleteSound, 1.0f);
                     }
                 }
             }

@@ -53,6 +53,10 @@ protected:
 
     PhysicsMaterial* baseMaterial;
 
+    Sound* brushMoveSound;
+    Sound* brushPlaceSound;
+    Sound* brushDeleteSound;
+
     std::unordered_map<std::string, ObjectData> objectPool;
     std::unordered_map<std::string, InteractiveObject*> sceneObjects;
     
@@ -73,6 +77,7 @@ protected:
     Texture* redTexture; // for illegal placements
     bool brushUsesRedTexture = false;
     int brushZ = 0;
+    GridPos prevGP;
 
     int objectIndex = 0;
     std::string getUniqueObjectName();
