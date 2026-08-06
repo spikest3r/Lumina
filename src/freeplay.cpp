@@ -9,6 +9,7 @@
 
 #include "helpers.h"
 #include "objects.h"
+#include "objectresources.h"
 
 constexpr Vector2 toolbarButtonSize = {110,50};
 
@@ -85,6 +86,8 @@ void ApplyFakeGravity(GameObject* obj, Engine* engine, float dt, float fallSpeed
 }
 
 void FreeplayScene::InitScene(Engine* engine) {
+    resourceManager = new ResourceManager(engine);
+
     engine->SetUICallback([this](Engine* engine)
     {
         this->UICallback(engine);
@@ -94,10 +97,6 @@ void FreeplayScene::InitScene(Engine* engine) {
     baseMaterial = engine->createPhysicsMaterial(0.5f,0.5f,0.5f);
 
     constructGameObjects(engine);
-
-    brushMoveSound = engine->createSound("brushMove", "assets/sounds/move.wav", false, true);
-    brushPlaceSound = engine->createSound("brushPlace", "assets/sounds/place.wav", false, true);
-    brushDeleteSound = engine->createSound("brushDelete", "assets/sounds/delete-PREVIEW.wav", false, true);
 
     ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
 }
@@ -237,17 +236,17 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                     if(!brushUsesRedTexture) {
                         brushUsesRedTexture = true;
                         brushObject->transform.scale = {1.05f, 1.05f, 1.05f};
-                        brushObject->updateTexture(redTexture);
+                        brushObject->updateTexture(resourceManager->getTexture("red"));
                     }
                 } else {
                     if(brushUsesRedTexture) {
                         brushUsesRedTexture = false;
-                        if(!eraseBrush)
+                        if(!eraseBrush) {
                             brushObject->transform.scale = {1.0f, 1.0f, 1.0f};
+                            brushObject->updateTexture(brushObjectData.texture);
+                        }
                         else
                             brushObject->transform.scale = {0.0f,0.0f,0.0f};
-                        if(brushObjectData)
-                            brushObject->updateTexture(brushObjectData->texture);
                     }
                 }
 
@@ -258,6 +257,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 bool deleteBtnPress = engine->getMouseButton(deleteButton) == PRESS;
 
                 if(gp != prevGP && (!placeBtnPress && !deleteBtnPress) && (!eraseBrush || occupied)) {
+                    Sound* brushMoveSound = resourceManager->getSound("move", false, true);
                     brushObject->playSound(brushMoveSound, 1.0f);
                 }
                 prevGP = gp;
@@ -267,8 +267,8 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         // TODO: class for block
                         auto objectTrans = baseTransform;
                         objectTrans.position = hit;
-                        auto objectMesh = brushObjectData->mesh;
-                        auto objectTexture = brushObjectData->texture;
+                        auto objectMesh = brushObjectData.mesh;
+                        auto objectTexture = brushObjectData.texture;
                         auto name = getUniqueObjectName();
                         InteractiveObject* newObject = engine->createGameObject<InteractiveObject>(
                             objectTrans, objectMesh, objectTexture, baseMaterial, false
@@ -278,6 +278,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         objects.push_back(newObject);
                         occupiedCells[gp] = name;
 
+                        Sound* brushPlaceSound = resourceManager->getSound("place", false, true);
                         brushObject->playSound(brushPlaceSound, 1.0f);
                     } else if(occupied && deleteBtnPress) {
                         auto name = occupiedCells[gp];
@@ -290,6 +291,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         auto it = std::find(objects.begin(), objects.end(), object);
                         if(it != objects.end()) objects.erase(it);
 
+                        Sound* brushDeleteSound = resourceManager->getSound("delete", false, true);
                         brushObject->playSound(brushDeleteSound, 1.0f);
                     }
                 }
@@ -301,7 +303,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             eraseBrush = false;
             engine->requestDestroyGameObject(brushObject);
             brushObject = nullptr;
-            brushObjectData = nullptr;
+            brushObjectData = {nullptr, nullptr};
             setToolbarActive(true);
         }
     } else {
@@ -386,30 +388,21 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 void FreeplayScene::DestroyScene(Engine* engine) {
 
 }
-    // TODO: Move to brush creation section
+
 void FreeplayScene::constructGameObjects(Engine* engine) {
-    // load puppet
-    Texture* puppetTexture = engine->createTexture("puppetTexture", "assets/textures/puppet.png");
-    Mesh* puppetMesh = engine->createMesh("puppetMesh", "assets/models/puppet.obj");
-    objectPool["puppet"] = {puppetMesh, puppetTexture};
+    ObjectData puppetData = getObjectData("puppet");
 
     // create player puppet
     auto puppetTransform = baseTransform;
     puppetTransform.position.z = 10.0f;
     playerPuppet = engine->createGameObject<Puppet>(
-        puppetTransform, puppetMesh, puppetTexture, baseMaterial, false
+        puppetTransform, puppetData.mesh, puppetData.texture, baseMaterial, false
     );
     sceneObjects["player"] = playerPuppet;
     objects.push_back(playerPuppet);
 
-    redTexture = engine->createTexture("redTexture", "assets/textures/red.png");
-
-    // load other objects
-    Texture* blockTextureA = engine->createTexture("blockTexture", "assets/textures/block.png");
-    Mesh* blockMesh = engine->createMesh("blockMesh", "assets/models/block.obj");
-    objectPool["block"] = {blockMesh, blockTextureA};
-
     // create 5x5 field
+    ObjectData blockData = getObjectData("block");
     for(int dy = -2; dy <= 2; dy++) {
         for(int dx = -2; dx <= 2; dx++) {
             int x = dx * 2;
@@ -418,7 +411,7 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
             objectTrans.position = {static_cast<float>(x), static_cast<float>(y), 0.0f};
             GridPos gp = {x, y, 0};
             InteractiveObject* newObject = engine->createGameObject<InteractiveObject>(
-                objectTrans, blockMesh, blockTextureA, baseMaterial, false
+                objectTrans, blockData.mesh, blockData.texture, baseMaterial, false
             );
             auto name = getUniqueObjectName();
             newObject->name = name;
@@ -432,12 +425,9 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
 void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
     eraseBrush = name == "erase";
 
-    std::unordered_map<std::string, ObjectData>::iterator it;
+    ObjectData objData;
     if(!eraseBrush) {
-        it = objectPool.find(name);
-        if(it == objectPool.end()) {
-            throw std::runtime_error("Unknown brush \'" + name + "\'");
-        }
+        objData = getObjectData(name);
         lastBrushName = name;
     }
 
@@ -446,17 +436,13 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
         std::cout << "Brush already exists. Previous one IS NOT DESTROYED\n";
     }
 
-    Mesh* objectMesh = nullptr;
-    Texture* objectTexture = nullptr;
+    Mesh* objectMesh = objData.mesh;
+    Texture* objectTexture = objData.texture;
 
-    if(!eraseBrush) {
-        brushObjectData = &objectPool[name];
-
-        objectMesh = it->second.mesh;
-        objectTexture = it->second.texture;
-    } else {
-        objectMesh = objectPool["block"].mesh;
-        objectTexture = redTexture;
+    if(eraseBrush) {
+        ObjectData block = getObjectData("block");
+        objectMesh = block.mesh;
+        objectTexture = resourceManager->getTexture("red");
     }
     
     brushObject = engine->createGameObject<GameObject>(
@@ -469,6 +455,7 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
     }
 
     activeBrush = true;
+    brushObjectData = std::move(objData);
 }
 
 std::string FreeplayScene::getUniqueObjectName() {
@@ -480,4 +467,17 @@ void FreeplayScene::setToolbarActive(bool active) {
     toolbarTime = 0.0f;
     toolbarY = active ? -70.0f : 0.0f;
     toolbarAnimation = true;
+}
+
+ObjectData FreeplayScene::getObjectData(std::string objectName) {
+    auto it = objectResources.find(objectName);
+    if(it != objectResources.end()) {
+        Mesh* mesh = resourceManager->getMesh(it->second.mesh);
+        // TODO: select texture variations
+        Texture* texture = resourceManager->getTexture(it->second.textures[0]);
+        return {mesh, texture};
+    } else {
+        throw std::runtime_error("Unknown object " + objectName);
+    }
+    return {nullptr, nullptr};
 }

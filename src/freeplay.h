@@ -4,7 +4,9 @@
 #include <scene.h>
 #include <unordered_map>
 #include <unordered_set>
+
 #include "objects.h"
+#include "resman.h"
 
 struct ObjectData {
     Mesh* mesh;
@@ -34,6 +36,8 @@ struct GridPosHash
 
 class FreeplayScene : public Scene {
 protected:
+    ResourceManager* resourceManager;
+    
     void InitScene(Engine* engine) override;
     void UpdateScene(Engine* engine) override;
     void DestroyScene(Engine* engine) override;
@@ -51,13 +55,10 @@ protected:
 
     void constructGameObjects(Engine* engine);
 
+    ObjectData getObjectData(std::string objectName);
+
     PhysicsMaterial* baseMaterial;
 
-    Sound* brushMoveSound;
-    Sound* brushPlaceSound;
-    Sound* brushDeleteSound;
-
-    std::unordered_map<std::string, ObjectData> objectPool;
     std::unordered_map<std::string, InteractiveObject*> sceneObjects;
     
     std::vector<InteractiveObject*> objects;
@@ -72,7 +73,7 @@ protected:
     bool activeBrush = false;
     bool eraseBrush = false;
     GameObject* brushObject;
-    ObjectData* brushObjectData;
+    ObjectData brushObjectData;
     std::string lastBrushName = "";
     Texture* redTexture; // for illegal placements
     bool brushUsesRedTexture = false;
