@@ -4,7 +4,22 @@
 #include "helpers.h"
 #include "lumen-inc/vm.h"
 
-class InteractiveObject : public GameObject {
+enum VMState {
+    RUNNING,
+    HALTED,
+    SUSPENDED,
+    DONE
+};
+
+// non-interactive objects/tiles
+
+class Tile : public GameObject {
+
+};
+
+// interactive objects/tiles
+
+class InteractiveObject : public Tile {
 public:
     VMProgramData program;
     VMExecutionData vm;
@@ -12,12 +27,5 @@ public:
 
     InteractiveObject();
     void resetVM(); // clears VM state
-    void stepVM();
-};
-
-// user objects
-
-class Puppet : public InteractiveObject {
-public:
-    
+    VMState stepVM();
 };

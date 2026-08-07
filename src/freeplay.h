@@ -50,6 +50,8 @@ protected:
     // TODO: expose sensitivity in settings
     float sensitivity = 0.15f;
     float zoomSensitivity = 0.4f;
+
+    bool hotkeyToggle = false;
     
     virtual void UICallback(Engine* engine);
 
@@ -59,12 +61,13 @@ protected:
 
     PhysicsMaterial* baseMaterial;
 
-    std::unordered_map<std::string, InteractiveObject*> sceneObjects;
+    std::unordered_map<std::string, Tile*> sceneObjects;
+    std::unordered_map<std::string, InteractiveObject*> sceneEntities;
     
     std::vector<InteractiveObject*> objects;
     std::unordered_map<GridPos, std::string, GridPosHash> occupiedCells;
 
-    Puppet* playerPuppet;
+    InteractiveObject* playerPuppet;
 
     std::string sourceCode; // for editor and blocks intermediate
     bool running = false;
@@ -90,4 +93,10 @@ protected:
     bool toolbarAnimation = false;
 
     void createBrush(const std::string& name, Engine* engine);
+
+    // toggle between blocks and code
+    bool codeMode = true; // PROD: false
+
+    int haltedObjects = 0;
+    int objectCount = 0;
 };

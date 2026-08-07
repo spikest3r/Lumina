@@ -11,5 +11,8 @@ struct ObjectResources {
 
 static std::unordered_map<std::string, ObjectResources> objectResources = {
     {"puppet", {"puppet", {"puppet"}}},
-    {"block", {"block", {"block"}}}
+    {"block", {"block", {"block"}}},
+    {"ramp", {"ramp", {"block"}}},
+    {"cylinder", {"cylinder", {"block"}}},
+    {"flag", {"flag", {"flag-red"}}}
 };

@@ -16,8 +16,9 @@ void InteractiveObject::resetVM() {
     vm.suspended = false;
 }
 
-void InteractiveObject::stepVM() {
-    if(vm.suspended || vm.halt) return;
+VMState InteractiveObject::stepVM() {
+    if(vm.suspended) return SUSPENDED;
+    if(vm.halt) return HALTED;
 
     auto opcode = program.bytecode[vm.PC];
     int offset = getOpCodeOffset(opcode);
@@ -29,11 +30,17 @@ void InteractiveObject::stepVM() {
     } catch(const std::exception& e) {
         std::cerr << "Something went wrong\n";
         std::cerr << e.what() << std::endl;
+        return DONE;
     }
 
     if(vm.halt || result == -1) {
-        return;
+        std::cout << result << std::endl;
+        return DONE;
     }
 
     vm.PC = result;
+
+    return RUNNING;
 }
+
+// user objects

@@ -8,7 +8,7 @@ class ENGINE_API UIFont {
 
 class ENGINE_API ToolUI {
 public:
-	static void Begin(const char* name, bool borderless = false);
+	static void Begin(const char* name, bool borderless = false, bool resizable = true);
 	static void End();
 	static bool Button(const char* text);
 	static bool Button(const char* text, Vector2 size);
