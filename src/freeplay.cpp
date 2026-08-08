@@ -11,6 +11,8 @@
 #include "objects.h"
 #include "objectresources.h"
 
+#include <typeinfo>
+
 constexpr Vector2 toolbarButtonSize = {110,50};
 
 #define MAX_WORLD_HEIGHT 4
@@ -128,17 +130,33 @@ void FreeplayScene::UICallback(Engine* engine) {
                 
                 objectCount = objects.size();
                 running = true;
+
+                propertiesPanelType = CLOSED;
+                propertiesObject->updateTexture(propertiesObjectTexture);
+                propertiesObject = nullptr;
+                textureSelection = false;
+                propertiesObjectTexture = nullptr;
             }
         }
     }
     ToolUI::SameLine();
     if(ToolUI::Button("Add object", toolbarButtonSize)) {
-        addObjectMenu = !addObjectMenu;
+        if(!addObjectMenu && running) {
+            // TODO: Dialog
+            std::cout << "Not Allowed\n";
+        } else {
+            addObjectMenu = !addObjectMenu;
+        }
+    }
+    ToolUI::SameLine();
+    if(ToolUI::Button("Camera", toolbarButtonSize)) {
+        cameraMode = true;
+        setToolbarActive(false);
     }
     ToolUI::End();
     
     // code editor
-    if(codeMode && !activeBrush) {
+    if(codeMode && toolbarActive) {
         ToolUI::SetNextWindowSize({extents.x / 3, extents.y - 70});
         ToolUI::SetNextWindowPos({0, 70});
         ToolUI::Begin("Code editor", false, false);
@@ -147,7 +165,7 @@ void FreeplayScene::UICallback(Engine* engine) {
     }
 
     // add object panel
-    if(addObjectMenu && !activeBrush) {
+    if(addObjectMenu && toolbarActive && !running) {
         ToolUI::Begin("Add object");
         // Special brushes
         ToolUI::Text("Tools");
@@ -172,6 +190,21 @@ void FreeplayScene::UICallback(Engine* engine) {
         // Special tiles
         ToolUI::End();
     }
+    
+    // properties panel
+    if(propertiesPanelType != CLOSED && toolbarActive && propertiesObject) {
+        ToolUI::Begin("Object properties");
+        ToolUI::TextField("Name", propertiesObject->name, true);
+        std::string idText = "Unique ID: " + propertiesObject->id;
+        ToolUI::Text(idText.c_str());
+        std::string typeText = "Type: " + propertiesObject->type;
+        ToolUI::Text(typeText.c_str());
+        if(propertiesPanelType == INTERACTIVE) {
+            // position
+            ToolUI::InputFloat3("Position", propertiesObject->transform.position);
+        }
+        ToolUI::End();
+    }
 }
 
 void FreeplayScene::UpdateScene(Engine* engine) {
@@ -180,6 +213,15 @@ void FreeplayScene::UpdateScene(Engine* engine) {
     auto altState = engine->getKey(KeyCode::LeftAlt);
     if(altState == PRESS) hotkeyToggle = true;
     else if(altState == RELEASE) hotkeyToggle = false;
+
+    static bool escHeld = false;
+    auto escState = engine->getKey(KeyCode::Escape);
+    bool escOnFrame = escState == PRESS && !escHeld;
+    if(escState == PRESS && !escHeld) {
+        escHeld = true;
+    } else if(escState == RELEASE && escHeld) {
+        escHeld = false;
+    }
 
     if(toolbarAnimation) {
         toolbarY = lerp(toolbarY, targetToolbarY, toolbarTime);
@@ -204,6 +246,13 @@ void FreeplayScene::UpdateScene(Engine* engine) {
     if(!activeBrush && !lastBrushName.empty()) {
         if(hotkeyToggle && engine->getKey(KeyCode::Q) == PRESS) {
             createBrush(lastBrushName, engine);
+        }
+    }
+
+    if(!cameraMode && toolbarActive) {
+        if(hotkeyToggle && engine->getKey(KeyCode::C) == PRESS) {
+            cameraMode = true;
+            setToolbarActive(false);
         }
     }
 
@@ -299,17 +348,25 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                             objectTrans, objectMesh, objectTexture, baseMaterial, false
                         );
                         newObject->name = name;
+                        newObject->id = name;
+                        newObject->type = lastBrushName;
                         sceneObjects[name] = newObject;
                         occupiedCells[gp] = name;
 
                         Sound* brushPlaceSound = resourceManager->getSound("place", false, true);
                         brushObject->playSound(brushPlaceSound, 1.0f);
                     } else if(occupied && deleteBtnPress) {
-                        auto name = occupiedCells[gp];
-                        auto object = sceneObjects[name];
+                        auto id = occupiedCells[gp];
+                        auto object = sceneObjects[id];
+
+                        // if we delete opened object, deactivate panel
+                        if(propertiesObject == object) {
+                            propertiesPanelType = CLOSED;
+                            propertiesObject = nullptr;
+                        }
                         
                         engine->requestDestroyGameObject(object);
-                        sceneObjects.erase(name);
+                        sceneObjects.erase(id);
                         occupiedCells.erase(gp);
 
                         auto it = std::find(objects.begin(), objects.end(), object);
@@ -322,7 +379,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             }
         }
 
-        if(engine->getKey(KeyCode::Escape) == PRESS) {
+        if(escOnFrame) {
             activeBrush = false;
             eraseBrush = false;
             engine->requestDestroyGameObject(brushObject);
@@ -330,7 +387,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             brushObjectData = {nullptr, nullptr};
             setToolbarActive(true);
         }
-    } else {
+    } else if(cameraMode) {
         // rotate camera with mouse buttons
         static bool wasHeldLeft = false;
         static bool wasHeldRight = false;
@@ -397,6 +454,61 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
         wasHeldLeft = heldLeft;
         wasHeldRight = heldRight;
+
+        if(escOnFrame) {
+            cameraMode = false;
+            setToolbarActive(true);
+        }
+    } else if(!running) {
+        // properties panel
+        static bool isLeftHeld;
+        bool leftPress = engine->getMouseButton(MouseButton::Left) == PRESS;
+
+        if(leftPress && !isLeftHeld) {
+            isLeftHeld = true;
+
+            Vector3 origin;
+            Vector3 direction;
+            engine->getMouseRay(origin, direction);
+            RaycastHit hit = engine->raycast(origin, direction, 100.0f);
+            if(hit.object) {
+                auto object = dynamic_cast<Tile*>(hit.object);
+                if(object) {
+                    auto data = getObjectData(object->type);
+                    propertiesObjectTexture = data.texture;
+
+                    propertiesObject = object;
+
+                    PropertiesPanelType type = TILE;
+                    if(dynamic_cast<InteractiveObject*>(object) != nullptr) {
+                        type = INTERACTIVE;
+                    }
+
+                    propertiesPanelType = type;
+                }
+            }
+        } else if(!leftPress && isLeftHeld) {
+            isLeftHeld = false;
+        }
+
+        if(escOnFrame && propertiesPanelType != CLOSED) {
+            propertiesObject->updateTexture(propertiesObjectTexture);
+
+            propertiesPanelType = CLOSED;
+            propertiesObject = nullptr;
+            propertiesObjectTexture = nullptr;
+            textureSelection = false;
+        }
+    }
+
+    if(propertiesPanelType != CLOSED) {
+        if(toolbarActive && !textureSelection) {
+            textureSelection = true;
+            propertiesObject->updateTexture(resourceManager->getTexture("yellow"));
+        } else if(!toolbarActive && textureSelection) {
+            textureSelection = false;
+            propertiesObject->updateTexture(propertiesObjectTexture);
+        }
     }
 
     if(running) {
@@ -431,6 +543,9 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
     playerPuppet = engine->createGameObject<InteractiveObject>(
         puppetTransform, puppetData.mesh, puppetData.texture, baseMaterial, false
     );
+    playerPuppet->name = "Player";
+    playerPuppet->type = "puppet";
+    playerPuppet->id = getUniqueObjectName();
     sceneEntities["player"] = playerPuppet;
     objects.push_back(playerPuppet);
 
@@ -448,6 +563,8 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
             );
             auto name = getUniqueObjectName();
             newObject->name = name;
+            newObject->id = name;
+            newObject->type = "block";
             sceneObjects[name] = newObject;
             occupiedCells[gp] = name;
         }
@@ -488,6 +605,8 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
 
     activeBrush = true;
     brushObjectData = std::move(objData);
+
+    // hide panels
     setToolbarActive(false);
 }
 
@@ -500,6 +619,7 @@ void FreeplayScene::setToolbarActive(bool active) {
     toolbarTime = 0.0f;
     toolbarY = active ? -70.0f : 0.0f;
     toolbarAnimation = true;
+    toolbarActive = active;
 }
 
 ObjectData FreeplayScene::getObjectData(std::string objectName) {

@@ -14,7 +14,9 @@ enum VMState {
 // non-interactive objects/tiles
 
 class Tile : public GameObject {
-
+public:
+    std::string type;
+    std::string id;
 };
 
 // interactive objects/tiles

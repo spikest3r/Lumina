@@ -16,6 +16,7 @@ public:
 	static void SameLine();
 	static void ProgressBar(float value, Vector2 vec);
 	static bool TextField(const char* label, char* buffer, size_t size, bool disallowBlank = false);
+	static bool TextField(const char* label, std::string& str, bool disallowBlank);
 	static bool InputFloat3(const char* label, Vector3& v, float speed = 0.1f);
 	static void SetNextWindowSize(Vector2 size);
 	static void SetNextWindowPos(Vector2 pos);

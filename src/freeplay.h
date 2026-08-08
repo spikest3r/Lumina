@@ -8,6 +8,12 @@
 #include "objects.h"
 #include "resman.h"
 
+enum PropertiesPanelType {
+    CLOSED,
+    TILE,
+    INTERACTIVE
+};
+
 struct ObjectData {
     Mesh* mesh;
     Texture* texture;
@@ -52,6 +58,12 @@ protected:
     float zoomSensitivity = 0.4f;
 
     bool hotkeyToggle = false;
+    bool cameraMode = false;
+    bool toolbarActive = true;
+    PropertiesPanelType propertiesPanelType = CLOSED;
+    Tile* propertiesObject = nullptr;
+    Texture* propertiesObjectTexture = nullptr;
+    bool textureSelection = false;
     
     virtual void UICallback(Engine* engine);
 

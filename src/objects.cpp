@@ -14,6 +14,8 @@ void InteractiveObject::resetVM() {
     vm.routineBase = 0;
     vm.halt = false;
     vm.suspended = false;
+
+    goToState = {};
 }
 
 VMState InteractiveObject::stepVM() {
