@@ -6,7 +6,7 @@
 enum class GoToPosResult { Reached, Blocked };
 
 struct GoToPosState {
-    Vector3 targetPos;
+    Vector2 targetPos;
     bool moving = false;
     float stuckTimer = 0.0f;
     Vector3 lastPos;
@@ -18,7 +18,7 @@ struct GoToPosState {
     static constexpr float moveSpeed = 2.5f;
 };
 
-void GoToPos(GameObject* obj, GoToPosState& state, Vector3 target,
+void GoToPos(GameObject* obj, GoToPosState& state, Vector2 target,
              std::function<void(GoToPosResult)> callback);
 
 

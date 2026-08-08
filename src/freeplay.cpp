@@ -132,9 +132,11 @@ void FreeplayScene::UICallback(Engine* engine) {
                 running = true;
 
                 propertiesPanelType = CLOSED;
-                propertiesObject->updateTexture(propertiesObjectTexture);
+                if(textureSelection) {
+                    propertiesObject->updateTexture(propertiesObjectTexture);
+                    textureSelection = false;
+                }
                 propertiesObject = nullptr;
-                textureSelection = false;
                 propertiesObjectTexture = nullptr;
             }
         }

@@ -68,7 +68,7 @@ std::unordered_map<std::string, Function> funcList = {
     {"strcase", {0xAC, 3}},
     {"trim", {0xAD, 2}},
     // extended
-    {"goToPos", {0xB0, 3}}
+    {"goToPos", {0xB0, 2}}
 };
 
 void printError(std::string error, int line) {

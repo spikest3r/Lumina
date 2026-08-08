@@ -353,13 +353,12 @@ std::unordered_map<int, NativeFn> funcMap = {
     // extended opcode set
     {0xB0, [](VMExecutionData& vm) {
         // goToPos x, y, z
-        float z = getFloat(vm.stack.back()); vm.stack.pop_back();
         float y = getFloat(vm.stack.back()); vm.stack.pop_back();
         float x = getFloat(vm.stack.back()); vm.stack.pop_back();
 
         vm.suspended = true;
 
-        GoToPos(vm.self, vm.self->goToState, {x, y, z}, [&vm](GoToPosResult result) {
+        GoToPos(vm.self, vm.self->goToState, {x, y}, [&vm](GoToPosResult result) {
             // vm.stack.push_back(Variant{TAG_INT, (int64_t)(result == GoToPosResult::Reached ? 1 : 0)});
             vm.suspended = false;
         });
