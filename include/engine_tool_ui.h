@@ -6,6 +6,11 @@ class ENGINE_API UIFont {
 
 };
 
+enum SeparatorType {
+    VERTICAL,
+    HORIZONTAL
+};
+
 class ENGINE_API ToolUI {
 public:
 	static void Begin(const char* name, bool borderless = false, bool resizable = true);
@@ -18,6 +23,8 @@ public:
 	static bool TextField(const char* label, char* buffer, size_t size, bool disallowBlank = false);
 	static bool TextField(const char* label, std::string& str, bool disallowBlank);
 	static bool InputFloat3(const char* label, Vector3& v, float speed = 0.1f);
+	static bool Checkbox(const char* label, bool* value);
+	static void Separator(SeparatorType type);
 	static void SetNextWindowSize(Vector2 size);
 	static void SetNextWindowPos(Vector2 pos);
 	static void AddFontFromFileTTF(UIFont& font, const char* fontName, float size);

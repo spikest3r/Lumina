@@ -45,4 +45,22 @@ VMState InteractiveObject::stepVM() {
     return RUNNING;
 }
 
+bool InteractiveObject::compileCode(std::string& errBuffer) {
+    // compile code
+    CompilerData data;
+    int status = compile(sourceCode, &data, errBuffer, false, false); // TODO: rid of flags
+    if(status != 0) {
+        // compilation failed
+        std::cout << "Failed to compile\n";
+        return false;
+    } else {
+        // proceed
+        program.bytecode = std::move(data.bytecode);
+        program.stringPool = std::move(data.stringPool);
+        program.constPool = std::move(data.constPool);
+        program.variableCount = data.variableCount;
+    }
+    return true;
+}
+
 // user objects

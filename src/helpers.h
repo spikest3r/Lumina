@@ -24,3 +24,7 @@ void GoToPos(GameObject* obj, GoToPosState& state, Vector2 target,
 
 void UpdateGoToPos(GameObject* obj, GoToPosState& state, float dt, Engine* engine,
                    float stopDistance = 0.5f);
+
+                   
+Vector3 QuatToEuler(const Quaternion& q);
+Quaternion EulerToQuat(const Vector3& e);

@@ -3,6 +3,7 @@
 #include <engine.h>
 #include "helpers.h"
 #include "lumen-inc/vm.h"
+#include "lumen-inc/compiler.h"
 
 enum VMState {
     RUNNING,
@@ -17,6 +18,7 @@ class Tile : public GameObject {
 public:
     std::string type;
     std::string id;
+    bool isInteractive;
 };
 
 // interactive objects/tiles
@@ -27,7 +29,12 @@ public:
     VMExecutionData vm;
     GoToPosState goToState;
 
+    std::string sourceCode;
+
     InteractiveObject();
     void resetVM(); // clears VM state
+    bool compileCode(std::string& errBuffer);
     VMState stepVM();
+
+    bool gravity = false;
 };

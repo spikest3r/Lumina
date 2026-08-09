@@ -7,6 +7,7 @@
 
 #include "objects.h"
 #include "resman.h"
+#include "levelstate.h"
 
 enum PropertiesPanelType {
     CLOSED,
@@ -43,6 +44,10 @@ struct GridPosHash
 class FreeplayScene : public Scene {
 protected:
     ResourceManager* resourceManager;
+    LevelState levelState;
+
+    void instantiateLevel(Engine* engine);
+    void instantiateObject(Engine* engine, const LevelObject& object);
     
     void InitScene(Engine* engine) override;
     void UpdateScene(Engine* engine) override;
@@ -73,11 +78,11 @@ protected:
 
     PhysicsMaterial* baseMaterial;
 
-    std::unordered_map<std::string, Tile*> sceneObjects;
-    std::unordered_map<std::string, InteractiveObject*> sceneEntities;
+    std::unordered_map<std::string, Tile*> sceneObjects; // tiles
+    std::unordered_map<std::string, InteractiveObject*> sceneEntities; // objects with code
     
-    std::vector<InteractiveObject*> objects;
-    std::unordered_map<GridPos, std::string, GridPosHash> occupiedCells;
+    std::vector<InteractiveObject*> objects; // vector of objects with code
+    std::unordered_map<GridPos, std::string, GridPosHash> occupiedCells; // occupied cells by tiles
 
     InteractiveObject* playerPuppet;
 
@@ -111,4 +116,7 @@ protected:
 
     int haltedObjects = 0;
     int objectCount = 0;
+
+    std::string errBuffer;
+    bool errorDialog = false;
 };

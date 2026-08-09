@@ -14,8 +14,18 @@
 #include <typeinfo>
 
 constexpr Vector2 toolbarButtonSize = {110,50};
+constexpr float grid = 2.0f;
 
 #define MAX_WORLD_HEIGHT 4
+
+static GridPos WorldToGrid(const Vector3& pos)
+{
+    GridPos gp;
+    gp.x = static_cast<int>(std::round(pos.x / grid));
+    gp.y = static_cast<int>(std::round(pos.y / grid));
+    gp.z = static_cast<int>(std::round(pos.z / grid));
+    return gp;
+}
 
 static Transform baseTransform = {
     {0.0f,0.0f,0.0f},
@@ -108,27 +118,25 @@ void FreeplayScene::UICallback(Engine* engine) {
 
     ToolUI::SetNextWindowPos({0, toolbarY});
     ToolUI::SetNextWindowSize({extents.x, 70});
-    ToolUI::Begin("##toolbar", true);
+    ToolUI::Begin("##toolbar", true, false);
     if(ToolUI::Button(running ? "Stop" : "Run", toolbarButtonSize)) {
         if(running) {
             running = false;
+            instantiateLevel(engine);
         } else {
-            CompilerData data;
-            int status = compile(sourceCode, &data);
-            if(status != 0) {
-                std::cout << "Failed to compile\n";
-            } else {
-                // TODO: compile for each object
-                playerPuppet->program.bytecode = std::move(data.bytecode);
-                playerPuppet->program.stringPool = std::move(data.stringPool);
-                playerPuppet->program.constPool = std::move(data.constPool);
-                playerPuppet->program.variableCount = data.variableCount;
-
-                for(auto& object: objects) {
-                    object->resetVM();
+            bool status = true;
+            for(auto& object: objects) {
+                status = object->compileCode(errBuffer);
+                if(!status) {
+                    errorDialog = true;
+                    break;
                 }
-                
+                object->resetVM();
+            }
+
+            if(status) {
                 objectCount = objects.size();
+                haltedObjects = 0;
                 running = true;
 
                 propertiesPanelType = CLOSED;
@@ -145,7 +153,8 @@ void FreeplayScene::UICallback(Engine* engine) {
     if(ToolUI::Button("Add object", toolbarButtonSize)) {
         if(!addObjectMenu && running) {
             // TODO: Dialog
-            std::cout << "Not Allowed\n";
+            errBuffer = "Not allowed during runtime";
+            errorDialog = true;
         } else {
             addObjectMenu = !addObjectMenu;
         }
@@ -155,15 +164,34 @@ void FreeplayScene::UICallback(Engine* engine) {
         cameraMode = true;
         setToolbarActive(false);
     }
+    ToolUI::SameLine();
+    ToolUI::Separator(VERTICAL);
+    ToolUI::SameLine();
+    if(ToolUI::Button("Save", toolbarButtonSize)) {
+        levelState.Save("project.lumina");
+    }
+    ToolUI::SameLine();
+    if(ToolUI::Button("Load", toolbarButtonSize)) {
+        levelState.Load("project.lumina");
+        instantiateLevel(engine);
+    }
     ToolUI::End();
     
     // code editor
-    if(codeMode && toolbarActive) {
-        ToolUI::SetNextWindowSize({extents.x / 3, extents.y - 70});
-        ToolUI::SetNextWindowPos({0, 70});
-        ToolUI::Begin("Code editor", false, false);
-        ToolUI::InputTextMultiline("##editor", sourceCode);
-        ToolUI::End();
+    if(codeMode && toolbarActive && propertiesObject) {
+        if(propertiesObject->isInteractive) {
+            InteractiveObject* object = static_cast<InteractiveObject*>(propertiesObject);
+            ToolUI::SetNextWindowSize({extents.x / 3, extents.y - 70});
+            ToolUI::SetNextWindowPos({0, 70});
+            ToolUI::Begin("Code editor", false, false);
+            if(ToolUI::InputTextMultiline("##editor", object->sourceCode)) {
+                // TODO: optimize to direct modify
+                LevelObject currentObject = levelState.GetObject(object->id);
+                currentObject.sourceCode = object->sourceCode;
+                levelState.UpdateObject(currentObject.id, std::move(currentObject));
+            }
+            ToolUI::End();
+        }
     }
 
     // add object panel
@@ -196,15 +224,49 @@ void FreeplayScene::UICallback(Engine* engine) {
     // properties panel
     if(propertiesPanelType != CLOSED && toolbarActive && propertiesObject) {
         ToolUI::Begin("Object properties");
-        ToolUI::TextField("Name", propertiesObject->name, true);
+        bool shouldUpdate = false;
+        if(ToolUI::TextField("Name", propertiesObject->name, true)) {
+            shouldUpdate = true;
+        }
         std::string idText = "Unique ID: " + propertiesObject->id;
         ToolUI::Text(idText.c_str());
         std::string typeText = "Type: " + propertiesObject->type;
         ToolUI::Text(typeText.c_str());
         if(propertiesPanelType == INTERACTIVE) {
+            auto interactiveObject = static_cast<InteractiveObject*>(propertiesObject);
+
             // position
-            ToolUI::InputFloat3("Position", propertiesObject->transform.position);
+            if(ToolUI::InputFloat3("Position", interactiveObject->transform.position)) {
+                shouldUpdate = true;
+            }
+            Vector3 rot = QuatToEuler(interactiveObject->transform.rotation);
+            if (ToolUI::InputFloat3("Rotation", rot)) {
+                interactiveObject->transform.rotation = EulerToQuat(rot);
+                shouldUpdate = true;
+            }
+
+            // gravity
+            if(ToolUI::Checkbox("Gravity", &interactiveObject->gravity)) {
+                shouldUpdate = true;
+            }
+
+            if(shouldUpdate) {
+                LevelObject currentObject = levelState.GetObject(interactiveObject->id);
+                currentObject.name = interactiveObject->name;
+                currentObject.transform = interactiveObject->transform;
+                currentObject.gravity = interactiveObject->gravity;
+                levelState.UpdateObject(currentObject.id, std::move(currentObject));
+            }
         }
+        ToolUI::End();
+    }
+
+    if(errorDialog) {
+        ToolUI::Begin("Error");
+        if(ToolUI::Button("Close")) {
+            errorDialog = false;
+        }
+        ToolUI::Text(errBuffer.c_str());
         ToolUI::End();
     }
 }
@@ -272,16 +334,12 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             {
                 Vector3 hit = origin + direction * t;
 
-                constexpr float grid = 2.0f;
-
                 int scrollDelta = std::round(engine->getScrollDelta());
 
                 hit.x = std::round(hit.x / grid) * grid;
                 hit.y = std::round(hit.y / grid) * grid;
 
-                GridPos gp;
-                gp.x = static_cast<int>(hit.x);
-                gp.y = static_cast<int>(hit.y);
+                GridPos gp = WorldToGrid(hit);
 
                 if (scrollDelta < 0) // scroll down
                 {
@@ -340,20 +398,13 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
                 if(engine->isLastFrame()) {
                     if(!eraseBrush && !occupied && placeBtnPress) {
-                        // TODO: class for block
                         auto objectTrans = baseTransform;
                         objectTrans.position = hit;
-                        auto objectMesh = brushObjectData.mesh;
-                        auto objectTexture = brushObjectData.texture;
                         auto name = getUniqueObjectName();
-                        InteractiveObject* newObject = engine->createGameObject<InteractiveObject>(
-                            objectTrans, objectMesh, objectTexture, baseMaterial, false
-                        );
-                        newObject->name = name;
-                        newObject->id = name;
-                        newObject->type = lastBrushName;
-                        sceneObjects[name] = newObject;
-                        occupiedCells[gp] = name;
+
+                        LevelObject newObject = {name, name, lastBrushName, objectTrans, false, false};
+                        levelState.AddObject(name, newObject);
+                        instantiateObject(engine, newObject);
 
                         Sound* brushPlaceSound = resourceManager->getSound("place", false, true);
                         brushObject->playSound(brushPlaceSound, 1.0f);
@@ -371,8 +422,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         sceneObjects.erase(id);
                         occupiedCells.erase(gp);
 
-                        auto it = std::find(objects.begin(), objects.end(), object);
-                        if(it != objects.end()) objects.erase(it);
+                        levelState.DeleteObject(id);
 
                         Sound* brushDeleteSound = resourceManager->getSound("delete", false, true);
                         brushObject->playSound(brushDeleteSound, 1.0f);
@@ -476,6 +526,14 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             if(hit.object) {
                 auto object = dynamic_cast<Tile*>(hit.object);
                 if(object) {
+                    if(propertiesObject != nullptr && propertiesObjectTexture != nullptr) 
+                    {
+                        propertiesObject->updateTexture(propertiesObjectTexture);
+                        textureSelection = false;
+                        propertiesObject = nullptr;
+                        propertiesObjectTexture = nullptr;
+                    }
+
                     auto data = getObjectData(object->type);
                     propertiesObjectTexture = data.texture;
 
@@ -520,16 +578,19 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 continue;
             }
             UpdateGoToPos(object, object->goToState, dt, engine);
+            
+            if(object->gravity) {
+                ApplyFakeGravity(object, engine, dt);
+            }
         }
 
         if(haltedObjects == objectCount) {
             // run has finished
-            running = false;
+            // running = false;
+            haltedObjects = 0;
             std::cout << "Execution finished\n";
         }
     }
-
-    ApplyFakeGravity(playerPuppet, engine, dt);
 }
 
 void FreeplayScene::DestroyScene(Engine* engine) {
@@ -542,14 +603,9 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
     // create player puppet
     auto puppetTransform = baseTransform;
     puppetTransform.position.z = 10.0f;
-    playerPuppet = engine->createGameObject<InteractiveObject>(
-        puppetTransform, puppetData.mesh, puppetData.texture, baseMaterial, false
-    );
-    playerPuppet->name = "Player";
-    playerPuppet->type = "puppet";
-    playerPuppet->id = getUniqueObjectName();
-    sceneEntities["player"] = playerPuppet;
-    objects.push_back(playerPuppet);
+    auto puppetID = getUniqueObjectName();
+    LevelObject puppetLO = {"Player", puppetID, "puppet", puppetTransform, true, true};
+    levelState.AddObject(puppetID, puppetLO);
 
     // create 5x5 field
     ObjectData blockData = getObjectData("block");
@@ -559,18 +615,14 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
             int y = dy * 2;
             auto objectTrans = baseTransform;
             objectTrans.position = {static_cast<float>(x), static_cast<float>(y), 0.0f};
-            GridPos gp = {x, y, 0};
-            Tile* newObject = engine->createGameObject<Tile>(
-                objectTrans, blockData.mesh, blockData.texture, baseMaterial, false
-            );
             auto name = getUniqueObjectName();
-            newObject->name = name;
-            newObject->id = name;
-            newObject->type = "block";
-            sceneObjects[name] = newObject;
-            occupiedCells[gp] = name;
+            LevelObject blockLO = {name, name, "block", objectTrans, false, false};
+            levelState.AddObject(name, blockLO);
         }
     }
+
+    // instantiate level
+    instantiateLevel(engine);
 }
 
 void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
@@ -635,4 +687,78 @@ ObjectData FreeplayScene::getObjectData(std::string objectName) {
         throw std::runtime_error("Unknown object " + objectName);
     }
     return {nullptr, nullptr};
+}
+
+void FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object) {
+    auto interactive = object.isInteractive;
+    auto objectData = getObjectData(object.type);
+    if(interactive) {
+        // InteractiveObject
+        // instantiate game object
+        InteractiveObject* instance = engine->createGameObject<InteractiveObject>(
+            object.transform,
+            objectData.mesh,
+            objectData.texture,
+            baseMaterial,
+            false
+        );
+        // fill out info
+        instance->name = object.name;
+        instance->type = object.type;
+        instance->id = object.id;
+        instance->gravity = object.gravity;
+        instance->isInteractive = true;
+        instance->sourceCode = object.sourceCode;
+        // push to level
+        sceneEntities[object.id] = instance;
+        objects.push_back(instance);
+    } else {
+        // Tile
+        // instantiate game object
+        Tile* instance = engine->createGameObject<Tile>(
+            object.transform,
+            objectData.mesh,
+            objectData.texture,
+            baseMaterial,
+            false
+        );
+        // fill out info
+        instance->name = object.name;
+        instance->id = object.id;
+        instance->type = object.type;
+        instance->isInteractive = false;
+        // fill out GridPos
+        GridPos gp = WorldToGrid(object.transform.position);
+        // push to level
+        sceneObjects[object.id] = instance;
+        occupiedCells[gp] = object.name;
+    }
+}
+
+void FreeplayScene::instantiateLevel(Engine* engine) {
+    // destroy old state
+    // check entities
+    if(!sceneEntities.empty()) {
+        for (auto& object : objects) {
+            engine->requestDestroyGameObject(object);
+        }
+    }
+    objects.clear(); // clear interactive object vector
+    sceneEntities.clear();
+    
+    // check tiles
+    if(!sceneObjects.empty()) {
+        for (auto& [id, object] : sceneObjects) {
+            engine->requestDestroyGameObject(object);
+        }
+    }
+    sceneObjects.clear();
+    occupiedCells.clear(); // clear occupied cell map
+
+    // now reinstantiate the level objects from save state
+    const auto& state = levelState.GetLevelObjects();
+    for(auto& [id, object] : state) {
+        // check type
+        instantiateObject(engine, object);
+    }
 }

@@ -4,9 +4,10 @@
 #include "types.h"
 #include "tokenizer.h"
 
-int compile(const std::string& script, 
+int compile(const std::string& script,
     CompilerData* compilerData,
-    bool verbose = false, bool debugInfo = false
+    std::string& errBuffer,
+    bool verbose, bool debugInfo
 );
 
 void compileExpression(

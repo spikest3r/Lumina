@@ -71,8 +71,10 @@ std::unordered_map<std::string, Function> funcList = {
     {"goToPos", {0xB0, 2}}
 };
 
-void printError(std::string error, int line) {
-    std::cerr << "Error on line " << line << std::endl << "    >>> " << error << std::endl;
+void printError(std::string error, int line, std::string& errorBuffer) {
+    std::stringstream ss;
+    ss << "Error on line " << line << std::endl << "    >>> " << error << std::endl;
+    errorBuffer += ss.str();
 }
 
 void pushToStack(std::string token, CompilerData* data, std::vector<uint8_t>& bytecode) {
@@ -102,8 +104,11 @@ void pushToStack(std::string token, CompilerData* data, std::vector<uint8_t>& by
 
 int compile(const std::string& script,
     CompilerData* compilerData,
+    std::string& errBuffer,
     bool verbose, bool debugInfo
 ) {
+    errBuffer.clear();
+
     std::istringstream file(script);
 
     std::string line;
@@ -157,9 +162,14 @@ int compile(const std::string& script,
                     formula += tokens[i];
                 }
 
-                compileExpression(
-                    formula, compilerData, bytecode
-                ); // result in stack
+                try {
+                    compileExpression(
+                        formula, compilerData, bytecode
+                    ); // result in stack
+                } catch (const std::exception& e) {
+                    printError(e.what(), lineIndex, errBuffer);
+                    return -1;
+                }
                 
                 bytecode.push_back(0x02);
                 keyword = tokens[0];
@@ -170,7 +180,7 @@ int compile(const std::string& script,
             }
             else if (token == "label") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error", lineIndex, errBuffer);
                     return -1;
                 }
                 op = LABEL;
@@ -178,7 +188,7 @@ int compile(const std::string& script,
             }
             else if (token == "jump") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error", lineIndex, errBuffer);
                     return -1;
                 }
                 op = JUMP;
@@ -186,7 +196,7 @@ int compile(const std::string& script,
             }
             else if (token == "if") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error", lineIndex, errBuffer);
                     return -1;
                 }
                 op = IF;
@@ -198,7 +208,7 @@ int compile(const std::string& script,
             }
             else if (token == "endif") {
                 if (blockDepth == 0) {
-                    printError("Unexpected 'endif' (no matching 'if')", lineIndex);
+                    printError("Unexpected 'endif' (no matching 'if')", lineIndex, errBuffer);
                     return -1;
                 }
                 if (elseDefined[blockDepth - 1]) {
@@ -217,7 +227,7 @@ int compile(const std::string& script,
             }
             else if (token == "else") {
                 if (blockDepth == 0) {
-                    printError("Unexpected 'else' (no matching 'if')", lineIndex);
+                    printError("Unexpected 'else' (no matching 'if')", lineIndex, errBuffer);
                     return -1;
                 }
                 elseDefined[blockDepth - 1] = true;
@@ -233,7 +243,7 @@ int compile(const std::string& script,
             }
             else if (token == "halt") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error", lineIndex, errBuffer);
                     return -1;
                 }
                 bytecode.push_back(0xFF);
@@ -241,12 +251,12 @@ int compile(const std::string& script,
             }
             else if (token == "routine") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error", lineIndex, errBuffer);
                     return -1;
                 }
                 op = SUBROUTINE;
                 if (inRoutine) {
-                    printError("Nested routines are not allowed", lineIndex);
+                    printError("Nested routines are not allowed", lineIndex, errBuffer);
                     return -1;
                 }
                 inRoutine = true;
@@ -254,11 +264,11 @@ int compile(const std::string& script,
             }
             else if (token == "endroutine") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error", lineIndex, errBuffer);
                     return -1;
                 }
                 if (!inRoutine) {
-                    printError("Unexpected 'endroutine' (no matching 'routine')", lineIndex);
+                    printError("Unexpected 'endroutine' (no matching 'routine')", lineIndex, errBuffer);
                     return -1;
                 }
                 bytecode.push_back(0xFE); // RET
@@ -268,7 +278,7 @@ int compile(const std::string& script,
             }
             else if (token == "call") {
                 if (tokens.size() < 2) {
-                    printError("Syntax error: expected subroutine name after 'call'", lineIndex);
+                    printError("Syntax error: expected subroutine name after 'call'", lineIndex, errBuffer);
                     return -1;
                 }
                 std::string routineName = tokens[1];
@@ -307,9 +317,14 @@ int compile(const std::string& script,
             //case PUSH_STACK:
             {
                 if (token == ",") {
-                    compileExpression(
-                        functionArgument, compilerData, bytecode
-                    ); // result in stack
+                    try {
+                        compileExpression(
+                            functionArgument, compilerData, bytecode
+                        ); // result in stack
+                    } catch (const std::exception& e) {
+                        printError(e.what(), lineIndex, errBuffer);
+                        return -1;
+                    }
                     funcArgs++;
                     functionArgument.clear();
                     break;
@@ -368,14 +383,14 @@ int compile(const std::string& script,
                 auto it = condOpMap.find(keyword);
                 if (it != condOpMap.end()) {
                     if (conditionArgs != 1) {
-                        printError("Syntax error", lineIndex);
+                        printError("Syntax error", lineIndex, errBuffer);
                         return -1;
                     }
                     condOp = it->second;
                 }
                 else {
                     if (conditionArgs > 1 && condOp != COP_NONE) {
-                        printError("Syntax error", lineIndex);
+                        printError("Syntax error", lineIndex, errBuffer);
                         return -1;
                     }
                     pushToStack(token, compilerData, bytecode);
@@ -390,9 +405,14 @@ int compile(const std::string& script,
 
         switch (op) {
         case FUNC_CALL:
-            compileExpression(
-                functionArgument, compilerData, bytecode
-            ); // result in stack
+            try {
+                compileExpression(
+                    functionArgument, compilerData, bytecode
+                ); // result in stack
+            } catch (const std::exception& e) {
+                printError(e.what(), lineIndex, errBuffer);
+                return -1;
+            }
             funcArgs++;
             functionArgument.clear();
 
@@ -403,7 +423,7 @@ int compile(const std::string& script,
                 std::stringstream ss;
                 ss << "argument count mismatch for '" << key << "': expected " 
                     << requiredFuncArgs << ", got " << funcArgs << "\n";
-                printError(ss.str(), lineIndex);
+                printError(ss.str(), lineIndex, errBuffer);
                 return -1;
             }
             bytecode.push_back(0x04); // call function
@@ -414,7 +434,7 @@ int compile(const std::string& script,
             auto it = condOpcodeMap.find(condOp);
             if (it != condOpcodeMap.end()) {
                 if (conditionArgs != 2) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error", lineIndex, errBuffer);
                     return -1;
                 }
                 bytecode.push_back(it->second); // IF32 opcode
@@ -423,7 +443,7 @@ int compile(const std::string& script,
                 condJumpStack.back() = loc;
             }
             else {
-                printError("Syntax error", lineIndex);
+                printError("Syntax error", lineIndex, errBuffer);
                 return -1;
             }
         }
@@ -445,7 +465,7 @@ int compile(const std::string& script,
                 patchUint32(compilerData->bytecode, it.location, static_cast<uint32_t>(it2->second));
             }
             else {
-                printError("Label '" + it.keyword + "' is not defined in global scope", it.line);
+                printError("Label '" + it.keyword + "' is not defined in global scope", it.line, errBuffer);
                 return -1;
             }
         }
@@ -470,7 +490,7 @@ int compile(const std::string& script,
                     patchUint32(subroutineBytecode[idx], jump.location, relativeTarget);
                 }
                 else {
-                    printError("Label '" + jump.keyword + "' is not defined in routine scope", jump.line);
+                    printError("Label '" + jump.keyword + "' is not defined in routine scope", jump.line, errBuffer);
                     return -1;
                 }
             }
@@ -501,7 +521,7 @@ int compile(const std::string& script,
             }
         }
         else {
-            printError("Subroutine '" + keyword + "' is not defined", line);
+            printError("Subroutine '" + keyword + "' is not defined", line, errBuffer);
             return -1;
         }
     }

@@ -8,6 +8,7 @@
 #endif
 
 #include <string>
+#include <cstdint>
 
 class GameObject;
 
