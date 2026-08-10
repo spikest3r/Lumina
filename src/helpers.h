@@ -18,6 +18,11 @@ struct GoToPosState {
     static constexpr float moveSpeed = 2.5f;
 };
 
+struct WaitUntilGroundState {
+    bool waiting = false;
+    std::function<void()> onComplete;
+};
+
 void GoToPos(GameObject* obj, GoToPosState& state, Vector2 target,
              std::function<void(GoToPosResult)> callback);
 
@@ -25,6 +30,11 @@ void GoToPos(GameObject* obj, GoToPosState& state, Vector2 target,
 void UpdateGoToPos(GameObject* obj, GoToPosState& state, float dt, Engine* engine,
                    float stopDistance = 0.5f);
 
+void WaitUntilGround(GameObject* obj, WaitUntilGroundState& state,
+                      std::function<void()> callback);
+
+void UpdateWaitUntilGround(GameObject* obj, WaitUntilGroundState& state, Engine* engine,
+                             float rayDistance);
 
 Vector3 QuatToEuler(const Quaternion& q);
 Quaternion EulerToQuat(const Vector3& e);

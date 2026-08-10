@@ -137,7 +137,7 @@ public:
 			isDynamic
 		);
 
-		object->Start();
+		object->Start(this);
 
 		return object;
 	}

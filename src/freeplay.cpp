@@ -671,6 +671,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 }
             }
             UpdateGoToPos(object, object->goToState, dt, engine);
+            UpdateWaitUntilGround(object, object->waitGroundState, engine, 0.5f);
             
             if(object->gravity) {
                 ApplyFakeGravity(object, engine, dt);

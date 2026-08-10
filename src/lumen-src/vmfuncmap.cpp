@@ -352,7 +352,7 @@ std::unordered_map<int, NativeFn> funcMap = {
     }},
     // extended opcode set
     {0xB0, [](VMExecutionData& vm) {
-        // goToPos x, y, z
+        // goToPos x, y
         float y = getFloat(vm.stack.back()); vm.stack.pop_back();
         float x = getFloat(vm.stack.back()); vm.stack.pop_back();
 
@@ -363,4 +363,47 @@ std::unordered_map<int, NativeFn> funcMap = {
             vm.suspended = false;
         });
     }},
+    {0xB1, [](VMExecutionData& vm) {
+        // waitUntilGround
+        vm.suspended = true;
+
+        WaitUntilGround(vm.self, vm.self->waitGroundState, [&vm]() {
+            vm.suspended = false;
+        });
+    }},
+    {0xB2, [](VMExecutionData& vm) {
+        // setPos x, y, z
+        Vector3* pos = &vm.self->transform.position;
+        pos->z = getFloat(vm.stack.back());
+        vm.stack.pop_back();
+        pos->y = getFloat(vm.stack.back());
+        vm.stack.pop_back();
+        pos->x = getFloat(vm.stack.back());
+        vm.stack.pop_back();
+    }},
+    {0xB3, [](VMExecutionData& vm) {
+        // setRot x, y, z
+        // build euler angle
+        Vector3 rotation;
+        rotation.z = getFloat(vm.stack.back());
+        vm.stack.pop_back();
+        rotation.y = getFloat(vm.stack.back());
+        vm.stack.pop_back();
+        rotation.x = getFloat(vm.stack.back());
+        vm.stack.pop_back();
+        // convert to quat
+        auto quat = EulerToQuat(rotation);
+        vm.self->transform.rotation = quat;
+    }},
+    {0xB4, [](VMExecutionData& vm) {
+        // isColliding 'object', ptr
+        auto ptr = getInt(vm.stack.back()); vm.stack.pop_back();
+        auto str = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
+        
+        auto it = vm.self->touching.find(str);
+        bool colliding = it != vm.self->touching.end();
+
+        vm.variables[ptr].type = TAG_INT;
+        vm.variables[ptr].data = (int)colliding;
+    }}
 };

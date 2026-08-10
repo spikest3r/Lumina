@@ -35,8 +35,9 @@ public:
 
 	uint32_t getID();
 
-	virtual void Start();
-	virtual void Update();
+	virtual void Start(Engine* engine);
+	virtual void Update(Engine* engine);
+	virtual void Destroy(Engine* engine);
 private:
 	char padding[280];
 };
@@ -45,4 +46,8 @@ class ENGINE_API Trigger {
 public:
 	std::function<void(GameObject* other)> onTriggerEnter;
 	std::function<void(GameObject* other)> onTriggerExit;
+
+	void setPosition(Vector3 pos);
+private:
+	char padding[32];
 };

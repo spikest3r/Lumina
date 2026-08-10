@@ -87,6 +87,31 @@ void UpdateGoToPos(GameObject* obj, GoToPosState& state, float dt, Engine* engin
     }
 }
 
+void WaitUntilGround(GameObject* obj, WaitUntilGroundState& state,
+                      std::function<void()> callback) {
+    state.waiting = true;
+    state.onComplete = std::move(callback);
+}
+
+void UpdateWaitUntilGround(GameObject* obj, WaitUntilGroundState& state, Engine* engine,
+                             float rayDistance) {
+    if (!state.waiting) return;
+
+    Vector3 origin = obj->transform.position;
+    Vector3 down = { 0.0f, 0.0f, -1.0f };
+
+    RaycastHit hit = engine->raycast(origin, down, rayDistance);
+
+    bool grounded = (hit.object != nullptr && hit.object != obj);
+
+    if (grounded) {
+        state.waiting = false;
+        auto cb = std::move(state.onComplete);
+        state.onComplete = nullptr;
+        if (cb) cb();
+    }
+}
+
 // Euler (radians, XYZ order) -> Quaternion
 Quaternion EulerToQuat(const Vector3& e) {
     float cx = cosf(e.x * 0.5f), sx = sinf(e.x * 0.5f);

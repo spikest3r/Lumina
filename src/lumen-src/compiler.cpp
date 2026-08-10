@@ -68,7 +68,11 @@ std::unordered_map<std::string, Function> funcList = {
     {"strcase", {0xAC, 3}},
     {"trim", {0xAD, 2}},
     // extended
-    {"goToPos", {0xB0, 2}}
+    {"goToPos", {0xB0, 2}},
+    {"waitUntilGround", {0xB1, 0}},
+    {"setPos", {0xB2, 2}},
+    {"setRot", {0xB3, 3}},
+    {"isColliding", {0xB4, 2}}
 };
 
 void printError(std::string error, int line, std::string& errorBuffer) {
@@ -405,16 +409,18 @@ int compile(const std::string& script,
 
         switch (op) {
         case FUNC_CALL:
-            try {
-                compileExpression(
-                    functionArgument, compilerData, bytecode
-                ); // result in stack
-            } catch (const std::exception& e) {
-                printError(e.what(), lineIndex, errBuffer);
-                return -1;
+            if(!functionArgument.empty()) {
+                try {
+                    compileExpression(
+                        functionArgument, compilerData, bytecode
+                    ); // result in stack
+                } catch (const std::exception& e) {
+                    printError(e.what(), lineIndex, errBuffer);
+                    return -1;
+                }
+                funcArgs++;
+                functionArgument.clear();
             }
-            funcArgs++;
-            functionArgument.clear();
 
             if(funcArgs != requiredFuncArgs) {
                 auto it = std::find_if(funcList.begin(), funcList.end(),

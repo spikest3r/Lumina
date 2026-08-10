@@ -62,4 +62,12 @@ bool InteractiveObject::compileCode(std::string& errBuffer) {
     return true;
 }
 
+void InteractiveObject::Start(Engine* engine) {
+
+}
+
+void InteractiveObject::Destroy(Engine* engine) {
+
+}
+
 // user objects

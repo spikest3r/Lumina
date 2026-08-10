@@ -28,7 +28,9 @@ class InteractiveObject : public Tile {
 public:
     VMProgramData program;
     VMExecutionData vm;
+
     GoToPosState goToState;
+    WaitUntilGroundState waitGroundState;
 
     std::string sourceCode;
 
@@ -40,4 +42,9 @@ public:
 
     bool gravity = false;
     ExecutionType execType;
+
+    std::unordered_map<std::string, Tile*> touching;
+
+    void Start(Engine* engine) override;
+    void Destroy(Engine* engine) override;
 };
