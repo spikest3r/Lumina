@@ -4,6 +4,7 @@
 #include "helpers.h"
 #include "lumen-inc/vm.h"
 #include "lumen-inc/compiler.h"
+#include "levelstate.h"
 
 enum VMState {
     RUNNING,
@@ -35,6 +36,8 @@ public:
     void resetVM(); // clears VM state
     bool compileCode(std::string& errBuffer);
     VMState stepVM();
+    bool execLock = false;
 
     bool gravity = false;
+    ExecutionType execType;
 };

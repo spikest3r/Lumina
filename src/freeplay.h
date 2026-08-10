@@ -62,6 +62,7 @@ protected:
     float sensitivity = 0.15f;
     float zoomSensitivity = 0.4f;
 
+    bool extToggleF5 = false;
     bool hotkeyToggle = false;
     bool cameraMode = false;
     bool toolbarActive = true;
@@ -98,6 +99,7 @@ protected:
     Texture* redTexture; // for illegal placements
     bool brushUsesRedTexture = false;
     int brushZ = 0;
+    float rot = 0.0f;
     GridPos prevGP;
 
     int objectIndex = 0;

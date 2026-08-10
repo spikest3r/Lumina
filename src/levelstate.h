@@ -3,6 +3,12 @@
 #include <unordered_map>
 #include "engine_types.h"
 
+enum class ExecutionType : uint8_t {
+    ONCE, 
+    REPEAT, 
+    ONCLICK 
+};
+
 struct LevelObject {
     std::string name;
     std::string id;
@@ -14,6 +20,8 @@ struct LevelObject {
     bool gravity = false;
     // TODO: Make this switchable between blocks and code
     std::string sourceCode;
+
+    ExecutionType execType = ExecutionType::ONCE;
 };
 
 class LevelState {
@@ -24,7 +32,7 @@ public:
     void AddObject(const std::string& id, const LevelObject& object); // transfer ownership as well
     void DeleteObject(const std::string& id);
     void UpdateObject(const std::string& id, const LevelObject& newObject); // transfers ownership as well
-    LevelObject GetObject(const std::string& id);
+    LevelObject* GetObject(const std::string& id);
 
     std::unordered_map<std::string, LevelObject>& GetLevelObjects() { return levelObjects; }
     const std::unordered_map<std::string, LevelObject>& GetLevelObjects() const { return levelObjects; }

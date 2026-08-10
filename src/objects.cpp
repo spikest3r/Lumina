@@ -36,7 +36,6 @@ VMState InteractiveObject::stepVM() {
     }
 
     if(vm.halt || result == -1) {
-        std::cout << result << std::endl;
         return DONE;
     }
 

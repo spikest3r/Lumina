@@ -47,6 +47,7 @@ void LevelState::Save(const std::string& path) const {
         out.write(reinterpret_cast<const char*>(&obj.isInteractive), sizeof(bool));
         out.write(reinterpret_cast<const char*>(&obj.gravity), sizeof(bool));
         WriteString(out, obj.sourceCode);
+        out.write(reinterpret_cast<const char*>(&obj.execType), sizeof(ExecutionType));
     }
 
     if (!out) throw std::runtime_error("LevelState::Save - write failed for: " + path);
@@ -94,6 +95,9 @@ void LevelState::Load(const std::string& path) {
         // temporary
         ReadString(in, obj.sourceCode);
 
+        in.read(reinterpret_cast<char*>(&obj.execType), sizeof(ExecutionType));
+        if(!in) throw std::runtime_error("LevelState::Load - truncated file (execType)");
+
         loaded.emplace(std::move(key), std::move(obj));
     }
 
@@ -112,10 +116,10 @@ void LevelState::UpdateObject(const std::string& id, const LevelObject& newObjec
     levelObjects[id] = std::move(newObject);
 }
 
-LevelObject LevelState::GetObject(const std::string& id) {
+LevelObject* LevelState::GetObject(const std::string& id) {
     auto it = levelObjects.find(id);
     if(it != levelObjects.end()) {
-        return it->second;
+        return &it->second;
     } else {
         throw std::runtime_error("Unknown level object");
     }

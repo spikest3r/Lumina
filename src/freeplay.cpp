@@ -15,6 +15,8 @@
 
 constexpr Vector2 toolbarButtonSize = {110,50};
 constexpr float grid = 2.0f;
+constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
+constexpr float RAD2DEG = 180.0f / 3.14159265358979323846f;
 
 #define MAX_WORLD_HEIGHT 4
 
@@ -119,7 +121,8 @@ void FreeplayScene::UICallback(Engine* engine) {
     ToolUI::SetNextWindowPos({0, toolbarY});
     ToolUI::SetNextWindowSize({extents.x, 70});
     ToolUI::Begin("##toolbar", true, false);
-    if(ToolUI::Button(running ? "Stop" : "Run", toolbarButtonSize)) {
+    if(ToolUI::Button(running ? "Stop" : "Run", toolbarButtonSize) || extToggleF5) {
+        extToggleF5 = false;
         if(running) {
             running = false;
             instantiateLevel(engine);
@@ -130,6 +133,9 @@ void FreeplayScene::UICallback(Engine* engine) {
                 if(!status) {
                     errorDialog = true;
                     break;
+                }
+                if(object->execType == ExecutionType::ONCLICK) {
+                    object->execLock = true;
                 }
                 object->resetVM();
             }
@@ -152,7 +158,6 @@ void FreeplayScene::UICallback(Engine* engine) {
     ToolUI::SameLine();
     if(ToolUI::Button("Add object", toolbarButtonSize)) {
         if(!addObjectMenu && running) {
-            // TODO: Dialog
             errBuffer = "Not allowed during runtime";
             errorDialog = true;
         } else {
@@ -185,10 +190,8 @@ void FreeplayScene::UICallback(Engine* engine) {
             ToolUI::SetNextWindowPos({0, 70});
             ToolUI::Begin("Code editor", false, false);
             if(ToolUI::InputTextMultiline("##editor", object->sourceCode)) {
-                // TODO: optimize to direct modify
-                LevelObject currentObject = levelState.GetObject(object->id);
-                currentObject.sourceCode = object->sourceCode;
-                levelState.UpdateObject(currentObject.id, std::move(currentObject));
+                LevelObject* currentObject = levelState.GetObject(object->id);
+                currentObject->sourceCode = object->sourceCode;
             }
             ToolUI::End();
         }
@@ -224,38 +227,58 @@ void FreeplayScene::UICallback(Engine* engine) {
     // properties panel
     if(propertiesPanelType != CLOSED && toolbarActive && propertiesObject) {
         ToolUI::Begin("Object properties");
-        bool shouldUpdate = false;
-        if(ToolUI::TextField("Name", propertiesObject->name, true)) {
-            shouldUpdate = true;
-        }
-        std::string idText = "Unique ID: " + propertiesObject->id;
-        ToolUI::Text(idText.c_str());
-        std::string typeText = "Type: " + propertiesObject->type;
-        ToolUI::Text(typeText.c_str());
-        if(propertiesPanelType == INTERACTIVE) {
-            auto interactiveObject = static_cast<InteractiveObject*>(propertiesObject);
+        if(ToolUI::Button("Close")) {
+            propertiesObject->updateTexture(propertiesObjectTexture);
 
-            // position
-            if(ToolUI::InputFloat3("Position", interactiveObject->transform.position)) {
+            propertiesPanelType = CLOSED;
+            propertiesObject = nullptr;
+            propertiesObjectTexture = nullptr;
+            textureSelection = false;
+        } else {
+            bool shouldUpdate = false;
+            if(ToolUI::TextField("Name", propertiesObject->name, true)) {
                 shouldUpdate = true;
             }
-            Vector3 rot = QuatToEuler(interactiveObject->transform.rotation);
-            if (ToolUI::InputFloat3("Rotation", rot)) {
-                interactiveObject->transform.rotation = EulerToQuat(rot);
-                shouldUpdate = true;
-            }
+            std::string idText = "Unique ID: " + propertiesObject->id;
+            ToolUI::Text(idText.c_str());
+            std::string typeText = "Type: " + propertiesObject->type;
+            ToolUI::Text(typeText.c_str());
+            if(propertiesPanelType == INTERACTIVE) {
+                auto interactiveObject = static_cast<InteractiveObject*>(propertiesObject);
 
-            // gravity
-            if(ToolUI::Checkbox("Gravity", &interactiveObject->gravity)) {
-                shouldUpdate = true;
-            }
+                // position
+                if(ToolUI::InputFloat3("Position", interactiveObject->transform.position)) {
+                    shouldUpdate = true;
+                }
+                Vector3 rot = QuatToEuler(interactiveObject->transform.rotation);
+                rot = { rot.x * RAD2DEG, rot.y * RAD2DEG, rot.z * RAD2DEG };  // show degrees in UI
+                if (ToolUI::InputFloat3("Rotation", rot)) {
+                    interactiveObject->transform.rotation = EulerToQuat({
+                        rot.x * DEG2RAD, rot.y * DEG2RAD, rot.z * DEG2RAD
+                    });
+                    shouldUpdate = true;
+                }
 
-            if(shouldUpdate) {
-                LevelObject currentObject = levelState.GetObject(interactiveObject->id);
-                currentObject.name = interactiveObject->name;
-                currentObject.transform = interactiveObject->transform;
-                currentObject.gravity = interactiveObject->gravity;
-                levelState.UpdateObject(currentObject.id, std::move(currentObject));
+                // gravity
+                if(ToolUI::Checkbox("Gravity", &interactiveObject->gravity)) {
+                    shouldUpdate = true;
+                }
+
+                // execution type
+                ToolUI::Text("Execution type");
+                int execTypeInt = static_cast<int>(interactiveObject->execType);
+                if(ToolUI::RadioButtonInt("Once", &execTypeInt, 0)) shouldUpdate = true;
+                if(ToolUI::RadioButtonInt("Repeat", &execTypeInt, 1)) shouldUpdate = true;
+                if(ToolUI::RadioButtonInt("On Click", &execTypeInt, 2)) shouldUpdate = true;
+
+                if(shouldUpdate) {
+                    LevelObject* currentObject = levelState.GetObject(interactiveObject->id);
+                    currentObject->name = interactiveObject->name;
+                    currentObject->transform = interactiveObject->transform;
+                    currentObject->gravity = interactiveObject->gravity;
+                    currentObject->execType = (ExecutionType)execTypeInt;
+                    interactiveObject->execType = (ExecutionType)execTypeInt;
+                }
             }
         }
         ToolUI::End();
@@ -313,10 +336,21 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         }
     }
 
+    static bool shiftCam = false;
     if(!cameraMode && toolbarActive) {
         if(hotkeyToggle && engine->getKey(KeyCode::C) == PRESS) {
             cameraMode = true;
             setToolbarActive(false);
+        } else if(hotkeyToggle && engine->getKey(KeyCode::LeftShift) == PRESS) {
+            cameraMode = true;
+            shiftCam = true;
+            setToolbarActive(false);
+        }
+    } else if(shiftCam) {
+        if(engine->getKey(KeyCode::LeftShift) == RELEASE) {
+            cameraMode = false;
+            shiftCam = false;
+            setToolbarActive(true);
         }
     }
 
@@ -340,28 +374,43 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                 hit.y = std::round(hit.y / grid) * grid;
 
                 GridPos gp = WorldToGrid(hit);
+                static Quaternion rotation;
 
-                if (scrollDelta < 0) // scroll down
-                {
-                    if (brushZ > 0)
-                        brushZ--;
+                if(hotkeyToggle) {
+                    if(scrollDelta > 0) // scroll up
+                    {
+                        rot += 90.0f;
+                    } else if(scrollDelta < 0) {
+                        rot -= 90.0f;
+                    }
+
+                    if(scrollDelta != 0) {
+                        rotation = EulerToQuat({0.0f, 0.0f, rot * DEG2RAD});
+                        brushObject->transform.rotation = rotation;
+                    }
+                } else {
+                    if (scrollDelta < 0) // scroll down
+                    {
+                        if (brushZ > 0)
+                            brushZ--;
+                    }
+                    else if (scrollDelta > 0) // scroll up
+                    {
+                        gp.z = brushZ;
+                        bool currentOccupied = occupiedCells.contains(gp);
+
+                        gp.z = brushZ + 1;
+                        bool aboveOccupied = (brushZ + 1 <= MAX_WORLD_HEIGHT) && occupiedCells.contains(gp);
+
+                        if ((currentOccupied || aboveOccupied) && brushZ < MAX_WORLD_HEIGHT)
+                            brushZ++;
+                    }
+
+                    brushZ = std::clamp(brushZ, 0, MAX_WORLD_HEIGHT);
                 }
-                else if (scrollDelta > 0) // scroll up
-                {
-                    gp.z = brushZ;
-                    bool currentOccupied = occupiedCells.contains(gp);
 
-                    gp.z = brushZ + 1;
-                    bool aboveOccupied = (brushZ + 1 <= MAX_WORLD_HEIGHT) && occupiedCells.contains(gp);
-
-                    if ((currentOccupied || aboveOccupied) && brushZ < MAX_WORLD_HEIGHT)
-                        brushZ++;
-                }
-
-                brushZ = std::clamp(brushZ, 0, MAX_WORLD_HEIGHT);
-
-                hit.z = static_cast<float>(brushZ) * grid;
-                gp.z = brushZ;
+                hit.z = static_cast<float>(brushZ) * grid + 1;
+                gp.z = brushZ + 1;
 
                 brushObject->transform.position = hit;
 
@@ -400,6 +449,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                     if(!eraseBrush && !occupied && placeBtnPress) {
                         auto objectTrans = baseTransform;
                         objectTrans.position = hit;
+                        objectTrans.rotation = rotation;
                         auto name = getUniqueObjectName();
 
                         LevelObject newObject = {name, name, lastBrushName, objectTrans, false, false};
@@ -559,6 +609,29 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             propertiesObjectTexture = nullptr;
             textureSelection = false;
         }
+    } else if(running) {
+        static bool isLeftHeld;
+        bool leftPress = engine->getMouseButton(MouseButton::Left) == PRESS;
+
+        if(leftPress && !isLeftHeld) {
+            isLeftHeld = true;
+
+            Vector3 origin;
+            Vector3 direction;
+            engine->getMouseRay(origin, direction);
+            RaycastHit hit = engine->raycast(origin, direction, 100.0f);
+            if(hit.object) {
+                InteractiveObject* object = dynamic_cast<InteractiveObject*>(hit.object);
+                if(object) {
+                    if(object->execLock && object->execType == ExecutionType::ONCLICK) {
+                        object->execLock = false;
+                        object->resetVM();
+                    }
+                }
+            }
+        } else if(!leftPress && isLeftHeld) {
+            isLeftHeld = false;
+        }
     }
 
     if(propertiesPanelType != CLOSED) {
@@ -571,11 +644,31 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         }
     }
 
+    static bool f5Held = false;
+    auto f5State = engine->getKey(KeyCode::F5);
+    if(f5State == PRESS && !f5Held) {
+        f5Held = true;
+        extToggleF5 = !extToggleF5;
+    } else if(f5State == RELEASE && f5Held) {
+        f5Held = false;
+    }
+
     if(running) {
         for(auto& object: objects) {
-            if(object->stepVM() == DONE) {
-                haltedObjects++;
-                continue;
+            if(!object->execLock) {
+                if(object->stepVM() == DONE) {
+                    switch(object->execType) {
+                        case ExecutionType::ONCE:
+                            haltedObjects++;
+                            continue;
+                        case ExecutionType::ONCLICK:
+                            object->execLock = true;
+                            continue;
+                        case ExecutionType::REPEAT:
+                            object->resetVM();
+                            continue;
+                    }
+                }
             }
             UpdateGoToPos(object, object->goToState, dt, engine);
             
@@ -602,7 +695,7 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
 
     // create player puppet
     auto puppetTransform = baseTransform;
-    puppetTransform.position.z = 10.0f;
+    puppetTransform.position.z = 3.0f;
     auto puppetID = getUniqueObjectName();
     LevelObject puppetLO = {"Player", puppetID, "puppet", puppetTransform, true, true};
     levelState.AddObject(puppetID, puppetLO);
@@ -614,7 +707,7 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
             int x = dx * 2;
             int y = dy * 2;
             auto objectTrans = baseTransform;
-            objectTrans.position = {static_cast<float>(x), static_cast<float>(y), 0.0f};
+            objectTrans.position = {static_cast<float>(x), static_cast<float>(y), 1.0f};
             auto name = getUniqueObjectName();
             LevelObject blockLO = {name, name, "block", objectTrans, false, false};
             levelState.AddObject(name, blockLO);
@@ -648,8 +741,11 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
         objectTexture = resourceManager->getTexture("red");
     }
     
+    auto brushTransform = baseTransform;
+    Quaternion rotation = EulerToQuat({0.0f, 0.0f, rot * DEG2RAD});
+    brushTransform.rotation = rotation;
     brushObject = engine->createGameObject<GameObject>(
-        baseTransform, objectMesh, objectTexture, baseMaterial, false
+        brushTransform, objectMesh, objectTexture, baseMaterial, false
     );
     brushObject->tag = "Brush";
 
@@ -709,6 +805,7 @@ void FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object)
         instance->gravity = object.gravity;
         instance->isInteractive = true;
         instance->sourceCode = object.sourceCode;
+        instance->execType = object.execType;
         // push to level
         sceneEntities[object.id] = instance;
         objects.push_back(instance);

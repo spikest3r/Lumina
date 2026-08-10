@@ -24,6 +24,7 @@ public:
 	static bool TextField(const char* label, std::string& str, bool disallowBlank);
 	static bool InputFloat3(const char* label, Vector3& v, float speed = 0.1f);
 	static bool Checkbox(const char* label, bool* value);
+	static bool RadioButtonInt(const char* label, int* value, int option);
 	static void Separator(SeparatorType type);
 	static void SetNextWindowSize(Vector2 size);
 	static void SetNextWindowPos(Vector2 pos);
