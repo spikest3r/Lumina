@@ -82,7 +82,7 @@ std::unordered_map<std::string, Function> funcList = {
     {"moveForward", {0xBB, 1}},
     {"waitMs", {0xBC, 1}},
     {"destroySelf", {0xBD, 0}},
-    {"destroy", {0xBE, 0}},
+    // {"destroy", {0xBE, 0}},
     {"stopAll", {0xBF, 0}},
 };
 
@@ -313,6 +313,9 @@ int compile(const std::string& script,
                         funcIndex = it->second.opcode;
                         funcArgs = 0;
                         requiredFuncArgs = it->second.argCount;
+                    } else {
+                        printError("Unknown function: " + token, lineIndex, errBuffer);
+                        return -1;
                     }
                     continue;
                 }
