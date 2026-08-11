@@ -70,9 +70,20 @@ std::unordered_map<std::string, Function> funcList = {
     // extended
     {"goToPos", {0xB0, 2}},
     {"waitUntilGround", {0xB1, 0}},
-    {"setPos", {0xB2, 2}},
+    {"setPos", {0xB2, 3}},
     {"setRot", {0xB3, 3}},
-    {"isColliding", {0xB4, 2}}
+    {"isTouching", {0xB4, 2}},
+    {"askInt", {0xB5, 2}},
+    {"askStr", {0xB6, 2}},
+    {"getPos", {0xB7, 3}},
+    {"isKeyDown", {0xB8, 2}},
+    {"setPosXY", {0xB9, 2}},
+    {"isObstacleAhead", {0xBA, 1}},
+    {"moveForward", {0xBB, 1}},
+    {"waitMs", {0xBC, 1}},
+    {"destroySelf", {0xBD, 0}},
+    {"destroy", {0xBE, 0}},
+    {"stopAll", {0xBF, 0}},
 };
 
 void printError(std::string error, int line, std::string& errorBuffer) {

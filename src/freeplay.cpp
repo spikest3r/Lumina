@@ -101,12 +101,14 @@ void ApplyFakeGravity(GameObject* obj, Engine* engine, float dt, float fallSpeed
 
 void FreeplayScene::InitScene(Engine* engine) {
     resourceManager = new ResourceManager(engine);
+    engPtr = engine;
 
     engine->SetUICallback([this](Engine* engine)
     {
         this->UICallback(engine);
     });
     engine->setGroundPlaneActive(true);
+    //engine->setLightPosition({0.0f,0.0f,3.0f});
 
     baseMaterial = engine->createPhysicsMaterial(0.5f,0.5f,0.5f);
 
@@ -129,9 +131,10 @@ void FreeplayScene::UICallback(Engine* engine) {
         } else {
             bool status = true;
             for(auto& object: objects) {
-                status = object->compileCode(errBuffer);
+                std::string message;
+                status = object->compileCode(message);
                 if(!status) {
-                    errorDialog = true;
+                    showDialog("Compilation error", message, nullptr);
                     break;
                 }
                 if(object->execType == ExecutionType::ONCLICK) {
@@ -158,8 +161,7 @@ void FreeplayScene::UICallback(Engine* engine) {
     ToolUI::SameLine();
     if(ToolUI::Button("Add object", toolbarButtonSize)) {
         if(!addObjectMenu && running) {
-            errBuffer = "Not allowed during runtime";
-            errorDialog = true;
+            showDialog("Error", "Not allowed during runtime", nullptr);
         } else {
             addObjectMenu = !addObjectMenu;
         }
@@ -173,12 +175,20 @@ void FreeplayScene::UICallback(Engine* engine) {
     ToolUI::Separator(VERTICAL);
     ToolUI::SameLine();
     if(ToolUI::Button("Save", toolbarButtonSize)) {
-        levelState.Save("project.lumina");
+        if(running) {
+            showDialog("Error", "Not allowed during runtime", nullptr);
+        } else {
+            levelState.Save("project.lumina");
+        }
     }
     ToolUI::SameLine();
     if(ToolUI::Button("Load", toolbarButtonSize)) {
-        levelState.Load("project.lumina");
-        instantiateLevel(engine);
+        if(running) {
+            showDialog("Error", "Not allowed during runtime", nullptr);
+        } else {
+            levelState.Load("project.lumina");
+            instantiateLevel(engine);
+        }
     }
     ToolUI::End();
     
@@ -284,13 +294,46 @@ void FreeplayScene::UICallback(Engine* engine) {
         ToolUI::End();
     }
 
-    if(errorDialog) {
-        ToolUI::Begin("Error");
-        if(ToolUI::Button("Close")) {
-            errorDialog = false;
+    if(dialogs.size() > 0) {
+        std::vector<int> indicesToErase;
+        for(int i = 0; i < dialogs.size(); i++) {
+            auto& dialog = dialogs[i];
+            ToolUI::Begin(dialog.title.c_str());
+            ToolUI::Text(dialog.message.c_str());
+            if(ToolUI::Button("OK")) {
+                if(dialog.onClose) {
+                    dialog.onClose();
+                }
+                indicesToErase.push_back(i);
+            }
+            ToolUI::End();
         }
-        ToolUI::Text(errBuffer.c_str());
-        ToolUI::End();
+        for(auto& idx: indicesToErase) {
+            dialogs[idx] = std::move(dialogs.back());
+            dialogs.pop_back();
+        }
+    }
+
+    if(inputDialogs.size() > 0) {
+        std::vector<int> indicesToErase;
+        for(int i = 0; i < inputDialogs.size(); i++) {
+            auto& dialog = inputDialogs[i];
+            ToolUI::Begin(dialog.title.c_str());
+            ToolUI::Text(dialog.message.c_str());
+            std::string id = "##diag_" + dialog.title;
+            ToolUI::TextField(id.c_str(), dialog.input, false);
+            if(ToolUI::Button("OK")) {
+                if(dialog.onSubmit) {
+                    dialog.onSubmit(dialog.input);
+                }
+                indicesToErase.push_back(i);
+            }
+            ToolUI::End();
+        }
+        for(auto& idx: indicesToErase) {
+            inputDialogs[idx] = std::move(inputDialogs.back());
+            inputDialogs.pop_back();
+        }
     }
 }
 
@@ -653,35 +696,63 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         f5Held = false;
     }
 
-    if(running) {
-        for(auto& object: objects) {
-            if(!object->execLock) {
-                if(object->stepVM() == DONE) {
-                    switch(object->execType) {
-                        case ExecutionType::ONCE:
-                            haltedObjects++;
-                            continue;
-                        case ExecutionType::ONCLICK:
-                            object->execLock = true;
-                            continue;
-                        case ExecutionType::REPEAT:
-                            object->resetVM();
-                            continue;
+    if (running) {
+        static double vmAccumulator = 0.0;
+        constexpr double VM_INSTRUCTIONS_PER_SECOND = 5280.0;
+
+        vmAccumulator += dt * VM_INSTRUCTIONS_PER_SECOND;
+
+        int instructionsToRun = static_cast<int>(vmAccumulator);
+        vmAccumulator -= instructionsToRun;
+
+        for (auto& object : objects) {
+            bool c = false;
+
+            int instructions = instructionsToRun;
+
+            for (int ipf = 0; ipf < instructions; ipf++) {
+                if (!object->execLock) {
+                    if (object->stepVM() == DONE) {
+                        switch (object->execType) {
+                            case ExecutionType::ONCE:
+                                haltedObjects++;
+                                c = true;
+                                break;
+
+                            case ExecutionType::ONCLICK:
+                                object->execLock = true;
+                                c = true;
+                                break;
+
+                            case ExecutionType::REPEAT:
+                                object->resetVM();
+                                c = true;
+                                break;
+                        }
                     }
                 }
+
+                if (c)
+                    break;
             }
+
+            if (c)
+                continue;
+
             UpdateGoToPos(object, object->goToState, dt, engine);
             UpdateWaitUntilGround(object, object->waitGroundState, engine, 0.5f);
-            
-            if(object->gravity) {
+            UpdateWait(object->waitState, engine);
+
+            if (object->gravity) {
                 ApplyFakeGravity(object, engine, dt);
             }
         }
 
-        if(haltedObjects == objectCount) {
+        if (haltedObjects == objectCount) {
             // run has finished
             // running = false;
             haltedObjects = 0;
+            vmAccumulator = 0.0;
             std::cout << "Execution finished\n";
         }
     }
@@ -807,6 +878,7 @@ void FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object)
         instance->isInteractive = true;
         instance->sourceCode = object.sourceCode;
         instance->execType = object.execType;
+        instance->scene = this;
         // push to level
         sceneEntities[object.id] = instance;
         objects.push_back(instance);
@@ -859,4 +931,36 @@ void FreeplayScene::instantiateLevel(Engine* engine) {
         // check type
         instantiateObject(engine, object);
     }
+}
+
+void FreeplayScene::showDialog(const std::string& title, const std::string& message, std::function<void()> onClose) {
+    dialogs.push_back(
+        {title, message, std::move(onClose)}
+    );
+}
+
+void FreeplayScene::showInputDialog(const std::string& title, const std::string& message, std::function<void(std::string)> onSubmit) {
+    inputDialogs.push_back(
+        {title, message, "", std::move(onSubmit)}
+    );
+}
+
+void FreeplayScene::runtimeDestroyInteractive(InteractiveObject* object) {
+    // erase from objects vector
+    auto it = std::find(objects.begin(), objects.end(), object);
+    if (it != objects.end()) {
+        std::swap(*it, objects.back());
+        objects.pop_back();
+    }
+
+    // erase from map
+    sceneEntities.erase(object->id);
+
+    // request destroy
+    engPtr->requestDestroyGameObject(object);
+}
+
+void FreeplayScene::stopExecution() {
+    if(!running) return;
+    extToggleF5 = true;
 }

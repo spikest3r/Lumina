@@ -68,6 +68,7 @@ public:
 	ENGINE_API void requestDestroyScene(Scene* scene);
 
 	ENGINE_API RaycastHit raycast(Vector3 origin, Vector3 direction, float distance);
+	ENGINE_API SweepHit sweep(Vector3 pos, Vector3 size, GameObject* ignore = nullptr);
 
 	ENGINE_API void setClearColor(Vector3 clearColor);
 

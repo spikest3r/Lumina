@@ -1,4 +1,5 @@
 #include "objects.h"
+#include "freeplay.h"
 
 InteractiveObject::InteractiveObject() {
     vm.self = this;
@@ -63,11 +64,15 @@ bool InteractiveObject::compileCode(std::string& errBuffer) {
 }
 
 void InteractiveObject::Start(Engine* engine) {
-
+    engPtr = engine;
 }
 
-void InteractiveObject::Destroy(Engine* engine) {
-
+bool InteractiveObject::isTouching(std::string name) {
+    SweepHit hit = engPtr->sweep(transform.position, {2.5f, 2.5f, 2.5f}, this);
+    for (GameObject* obj : hit.objects) {
+        if(obj->name == name) return true;
+    }   
+    return false;
 }
 
 // user objects

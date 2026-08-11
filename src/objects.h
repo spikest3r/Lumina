@@ -6,6 +6,8 @@
 #include "lumen-inc/compiler.h"
 #include "levelstate.h"
 
+class FreeplayScene;
+
 enum VMState {
     RUNNING,
     HALTED,
@@ -31,6 +33,7 @@ public:
 
     GoToPosState goToState;
     WaitUntilGroundState waitGroundState;
+    WaitState waitState;
 
     std::string sourceCode;
 
@@ -43,8 +46,9 @@ public:
     bool gravity = false;
     ExecutionType execType;
 
-    std::unordered_map<std::string, Tile*> touching;
+    bool isTouching(std::string name);
 
+    Engine* engPtr;
+    FreeplayScene* scene;
     void Start(Engine* engine) override;
-    void Destroy(Engine* engine) override;
 };

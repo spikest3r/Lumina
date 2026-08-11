@@ -5,6 +5,7 @@
 #include "httplib.h"
 #include "objects.h"
 #include "helpers.h"
+#include "freeplay.h"
 
 std::set<std::string> capabilitySet = {
     "FS", "random", "HTTP"
@@ -28,33 +29,46 @@ double getFloat(const Variant& v) {
 
 std::unordered_map<int, NativeFn> funcMap = {
     {0x01, [](VMExecutionData& vm) {
+        vm.suspended = true;
         auto arg0 = vm.stack.back(); vm.stack.pop_back();
-        std::visit([](const auto& val) { std::cout << val; }, arg0.data);
-        std::cout << std::endl;
+        std::stringstream ss;
+        std::visit([&ss](const auto& val) { ss << val; }, arg0.data);
+        vm.self->scene->showDialog(vm.self->name + " says", ss.str(), [&vm]() {
+            vm.suspended = false;
+        });
     }},
     {0x02, [](VMExecutionData& vm) {
+        vm.suspended = true;
         auto arg0 = vm.stack.back(); vm.stack.pop_back();
-        std::visit([](const auto& val) { std::cout << val; }, arg0.data);
+        std::stringstream ss;
+        std::visit([&ss](const auto& val) { ss << val; }, arg0.data);
+        vm.self->scene->showDialog(vm.self->name + " says", ss.str(), [&vm]() {
+            vm.suspended = false;
+        });
     }},
     {0x03, [](VMExecutionData& vm) {
+        vm.suspended = true;
         auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
-        std::string input;
-        std::cin >> input;
-        int64_t result = 0;
-        try {
-            result = std::stoll(input);
-        } catch(...) {
-            std::cout << "Invalid value!" << std::endl;
-        }
-        vm.variables[varIndex].type = TAG_INT;
-        vm.variables[varIndex].data = result;
+        vm.self->scene->showInputDialog(vm.self->name, vm.self->name + " is asking for integer", [&vm, varIndex](std::string input) {
+            int64_t result = 0;
+            try {
+                result = std::stoll(input);
+            } catch(...) {
+                std::cout << "Invalid value!" << std::endl;
+            }
+            vm.variables[varIndex].type = TAG_INT;
+            vm.variables[varIndex].data = result;
+            vm.suspended = false;
+        });
     }},
     {0x04, [](VMExecutionData& vm) {
+        vm.suspended = true;
         auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
-        std::string input;
-        std::cin >> input;
-        vm.variables[varIndex].type = TAG_STRING;
-        vm.variables[varIndex].data = input;
+        vm.self->scene->showInputDialog(vm.self->name, vm.self->name + " is asking for string", [&vm, varIndex](std::string input) {
+            vm.variables[varIndex].type = TAG_STRING;
+            vm.variables[varIndex].data = input;
+            vm.suspended = false;
+        });
     }},
     {0x05, [](VMExecutionData& vm) {
         // str2int
@@ -374,15 +388,16 @@ std::unordered_map<int, NativeFn> funcMap = {
     {0xB2, [](VMExecutionData& vm) {
         // setPos x, y, z
         Vector3* pos = &vm.self->transform.position;
-        pos->z = getFloat(vm.stack.back());
+        pos->z = getNumeric(vm.stack.back());
         vm.stack.pop_back();
-        pos->y = getFloat(vm.stack.back());
+        pos->y = getNumeric(vm.stack.back());
         vm.stack.pop_back();
-        pos->x = getFloat(vm.stack.back());
+        pos->x = getNumeric(vm.stack.back());
         vm.stack.pop_back();
     }},
     {0xB3, [](VMExecutionData& vm) {
         // setRot x, y, z
+        constexpr float DEG_TO_RAD = 3.14159265358979323846f / 180.0f;
         // build euler angle
         Vector3 rotation;
         rotation.z = getFloat(vm.stack.back());
@@ -391,19 +406,138 @@ std::unordered_map<int, NativeFn> funcMap = {
         vm.stack.pop_back();
         rotation.x = getFloat(vm.stack.back());
         vm.stack.pop_back();
+        // convert to rad
+        rotation.x *= DEG_TO_RAD;
+        rotation.y *= DEG_TO_RAD;
+        rotation.z *= DEG_TO_RAD;
         // convert to quat
         auto quat = EulerToQuat(rotation);
         vm.self->transform.rotation = quat;
     }},
     {0xB4, [](VMExecutionData& vm) {
-        // isColliding 'object', ptr
+        // isTouching 'object', ptr
         auto ptr = getInt(vm.stack.back()); vm.stack.pop_back();
         auto str = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
         
-        auto it = vm.self->touching.find(str);
-        bool colliding = it != vm.self->touching.end();
+        bool colliding = vm.self->isTouching(str);
 
         vm.variables[ptr].type = TAG_INT;
         vm.variables[ptr].data = (int)colliding;
+    }},
+    {0xB5, [](VMExecutionData& vm) {
+        // askInt 'message', ptr
+        vm.suspended = true;
+        auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        auto message = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
+        vm.self->scene->showInputDialog(vm.self->name, message, [&vm, varIndex](std::string input) {
+            int64_t result = 0;
+            try {
+                result = std::stoll(input);
+            } catch(...) {
+                std::cout << "Invalid value!" << std::endl;
+            }
+            vm.variables[varIndex].type = TAG_INT;
+            vm.variables[varIndex].data = result;
+            vm.suspended = false;
+        });
+    }},
+    {0xB6, [](VMExecutionData& vm) {
+        // askStr 'message', ptr
+        vm.suspended = true;
+        auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        auto message = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
+        vm.self->scene->showInputDialog(vm.self->name, message, [&vm, varIndex](std::string input) {
+            vm.variables[varIndex].type = TAG_STRING;
+            vm.variables[varIndex].data = input;
+            vm.suspended = false;
+        });
+    }},
+    {0xB7, [](VMExecutionData& vm) {
+        // getPos &x, &y, &z
+        auto zIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        auto yIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        auto xIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+
+        vm.variables[zIndex].type = TAG_FLOAT;
+        vm.variables[yIndex].type = TAG_FLOAT;
+        vm.variables[xIndex].type = TAG_FLOAT;
+
+        vm.variables[zIndex].data = vm.self->transform.position.z;
+        vm.variables[yIndex].data = vm.self->transform.position.y;
+        vm.variables[xIndex].data = vm.self->transform.position.x;
+    }},
+    {0xB8, [](VMExecutionData& vm) {
+        // isKeyDown 'key', var
+        auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        vm.variables[varIndex].type = TAG_INT;
+        auto keyName = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
+        auto keyCode = KeyCodeFromString(keyName);
+        if(keyCode) {
+            auto state = vm.self->engPtr->getKey(keyCode.value());
+            vm.variables[varIndex].data = (int64_t)(state == PRESS);
+        } else {
+            vm.variables[varIndex].data = 0;
+        }
+    }},
+    {0xB9, [](VMExecutionData& vm) {
+        // setPosXY x, y
+        Vector3* pos = &vm.self->transform.position;
+        pos->y = getNumeric(vm.stack.back());
+        vm.stack.pop_back();
+        pos->x = getNumeric(vm.stack.back());
+        vm.stack.pop_back();
+    }},
+    {0xBA, [](VMExecutionData& vm) {
+        auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        vm.variables[varIndex].type = TAG_INT;
+
+        Quaternion q = vm.self->transform.rotation;
+        Vector3 forward = {
+            2.0f * q.z * q.w,
+            -(q.w * q.w - q.z * q.z),
+            0.0f
+        };
+
+        RaycastHit hit = vm.self->engPtr->raycast(
+            vm.self->transform.position, forward, 0.5f
+        );
+
+        bool blocked = hit.object != nullptr && hit.object != vm.self;
+        vm.variables[varIndex].data = blocked ? 1 : 0;
+    }},
+    {0xBB, [](VMExecutionData& vm) {
+        // moveForward distance
+        float dist = getNumeric(vm.stack.back()); vm.stack.pop_back();
+
+        Quaternion q = vm.self->transform.rotation;
+        Vector3 forward = {
+            2.0f * q.z * q.w,
+            -(q.w * q.w - q.z * q.z),
+            0.0f
+        };
+
+        vm.self->transform.position.x += forward.x * dist;
+        vm.self->transform.position.y += forward.y * dist;
+    }},
+    {0xBC, [](VMExecutionData& vm) {
+        // waitMs time
+        vm.suspended = true;
+        auto time = getNumeric(vm.stack.back()); vm.stack.pop_back();
+        Wait(vm.self->waitState, time, [&vm]() {
+            vm.suspended = false;
+        });
+    }},
+    {0xBD, [](VMExecutionData& vm) {
+        // destroySelf
+        vm.suspended = true; // will be destroyed anyway
+        vm.self->scene->runtimeDestroyInteractive(vm.self);
+    }},
+    {0xBE, [](VMExecutionData& vm) {
+        // TODO: reserved for future use
+    }},
+    {0xBF, [](VMExecutionData& vm) {
+        // stopAll - stops level execution
+        vm.suspended = true;
+        vm.self->scene->stopExecution();
     }}
 };

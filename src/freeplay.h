@@ -15,6 +15,19 @@ enum PropertiesPanelType {
     INTERACTIVE
 };
 
+struct Dialog {
+    std::string title;
+    std::string message;
+    std::function<void()> onClose;
+};
+
+struct InputDialog {
+    std::string title;
+    std::string message;
+    std::string input;
+    std::function<void(std::string)> onSubmit;
+};
+
 struct ObjectData {
     Mesh* mesh;
     Texture* texture;
@@ -42,6 +55,11 @@ struct GridPosHash
 };
 
 class FreeplayScene : public Scene {
+public:
+    void showDialog(const std::string& title, const std::string& message, std::function<void()> onClose);
+    void showInputDialog(const std::string& title, const std::string& message, std::function<void(std::string)> onSubmit);
+    void runtimeDestroyInteractive(InteractiveObject* object);
+    void stopExecution();
 protected:
     ResourceManager* resourceManager;
     LevelState levelState;
@@ -119,6 +137,10 @@ protected:
     int haltedObjects = 0;
     int objectCount = 0;
 
-    std::string errBuffer;
-    bool errorDialog = false;
+    std::vector<Dialog> dialogs;
+    std::vector<InputDialog> inputDialogs;
+    int dialogCount = 0; // cached dialog count
+    int inputDialogCount = 0; // cached count
+
+    Engine* engPtr;
 };

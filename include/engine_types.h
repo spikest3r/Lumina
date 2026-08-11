@@ -9,6 +9,7 @@
 
 #include <string>
 #include <cstdint>
+#include <vector>
 
 class GameObject;
 
@@ -239,6 +240,10 @@ public:
 struct RaycastHit {
     float distance;
     GameObject* object;
+};
+
+struct SweepHit {
+    std::vector<GameObject*> objects;
 };
 
 enum class PhysicsType {
