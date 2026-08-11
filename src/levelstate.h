@@ -1,12 +1,14 @@
 #pragma once
 #include <string>
+#include <fstream>
+#include <cstdint>
 #include <unordered_map>
 #include "engine_types.h"
 
 enum class ExecutionType : uint8_t {
-    ONCE, 
-    REPEAT, 
-    ONCLICK 
+    ONCE,
+    REPEAT,
+    ONCLICK
 };
 
 struct LevelObject {
@@ -16,7 +18,7 @@ struct LevelObject {
     Transform transform;
     bool isInteractive = false; // TODO
 
-    // TODO: Optimize away fields before for non tiles
+    // TODO: Optimize away fields for non-tiles
     bool gravity = false;
     // TODO: Make this switchable between blocks and code
     std::string sourceCode;
@@ -24,14 +26,22 @@ struct LevelObject {
     ExecutionType execType = ExecutionType::ONCE;
 };
 
+struct LevelStateHeader {
+    uint32_t magic;
+    uint32_t version;
+    int objectCounter;
+};
+
 class LevelState {
 public:
+    int objectCounter = 0;
+
     void Save(const std::string& path) const;
     void Load(const std::string& path);
 
-    void AddObject(const std::string& id, const LevelObject& object); // transfer ownership as well
+    void AddObject(const std::string& id, LevelObject object);   // moved into map
     void DeleteObject(const std::string& id);
-    void UpdateObject(const std::string& id, const LevelObject& newObject); // transfers ownership as well
+    void UpdateObject(const std::string& id, LevelObject newObject); // moved into map
     LevelObject* GetObject(const std::string& id);
 
     std::unordered_map<std::string, LevelObject>& GetLevelObjects() { return levelObjects; }

@@ -32,8 +32,10 @@ void LevelState::Save(const std::string& path) const {
     std::ofstream out(path, std::ios::binary);
     if (!out) throw std::runtime_error("LevelState::Save - failed to open file: " + path);
 
-    out.write(reinterpret_cast<const char*>(&LEVEL_FILE_MAGIC), sizeof(LEVEL_FILE_MAGIC));
-    out.write(reinterpret_cast<const char*>(&LEVEL_FILE_VERSION), sizeof(LEVEL_FILE_VERSION));
+    LevelStateHeader header{ LEVEL_FILE_MAGIC, LEVEL_FILE_VERSION, objectCounter };
+    out.write(reinterpret_cast<const char*>(&header.magic), sizeof(header.magic));
+    out.write(reinterpret_cast<const char*>(&header.version), sizeof(header.version));
+    out.write(reinterpret_cast<const char*>(&header.objectCounter), sizeof(header.objectCounter));
 
     uint32_t count = static_cast<uint32_t>(levelObjects.size());
     out.write(reinterpret_cast<const char*>(&count), sizeof(count));
@@ -57,15 +59,16 @@ void LevelState::Load(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::runtime_error("LevelState::Load - failed to open file: " + path);
 
-    uint32_t magic = 0, version = 0;
-    in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-    in.read(reinterpret_cast<char*>(&version), sizeof(version));
+    LevelStateHeader header{};
+    in.read(reinterpret_cast<char*>(&header.magic), sizeof(header.magic));
+    in.read(reinterpret_cast<char*>(&header.version), sizeof(header.version));
+    in.read(reinterpret_cast<char*>(&header.objectCounter), sizeof(header.objectCounter));
     if (!in) throw std::runtime_error("LevelState::Load - truncated header: " + path);
-    if (magic != LEVEL_FILE_MAGIC)
+    if (header.magic != LEVEL_FILE_MAGIC)
         throw std::runtime_error("LevelState::Load - not a valid level file: " + path);
-    if (version != LEVEL_FILE_VERSION)
+    if (header.version != LEVEL_FILE_VERSION)
         throw std::runtime_error("LevelState::Load - unsupported version (" +
-                                  std::to_string(version) + "): " + path);
+                                  std::to_string(header.version) + "): " + path);
 
     uint32_t count = 0;
     in.read(reinterpret_cast<char*>(&count), sizeof(count));
@@ -96,15 +99,16 @@ void LevelState::Load(const std::string& path) {
         ReadString(in, obj.sourceCode);
 
         in.read(reinterpret_cast<char*>(&obj.execType), sizeof(ExecutionType));
-        if(!in) throw std::runtime_error("LevelState::Load - truncated file (execType)");
+        if (!in) throw std::runtime_error("LevelState::Load - truncated file (execType)");
 
         loaded.emplace(std::move(key), std::move(obj));
     }
 
     levelObjects = std::move(loaded);
+    objectCounter = header.objectCounter;
 }
 
-void LevelState::AddObject(const std::string& id, const LevelObject& object) {
+void LevelState::AddObject(const std::string& id, LevelObject object) {
     levelObjects[id] = std::move(object);
 }
 
@@ -112,15 +116,14 @@ void LevelState::DeleteObject(const std::string& id) {
     levelObjects.erase(id);
 }
 
-void LevelState::UpdateObject(const std::string& id, const LevelObject& newObject) {
+void LevelState::UpdateObject(const std::string& id, LevelObject newObject) {
     levelObjects[id] = std::move(newObject);
 }
 
 LevelObject* LevelState::GetObject(const std::string& id) {
     auto it = levelObjects.find(id);
-    if(it != levelObjects.end()) {
+    if (it != levelObjects.end()) {
         return &it->second;
-    } else {
-        throw std::runtime_error("Unknown level object");
     }
+    throw std::runtime_error("Unknown level object");
 }

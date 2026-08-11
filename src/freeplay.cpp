@@ -159,7 +159,15 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
     }
     ToolUI::SameLine();
-    if(ToolUI::Button("Add object", toolbarButtonSize)) {
+    if(ToolUI::Button("Brushes", toolbarButtonSize)) {
+        if(!brushMenu && running) {
+            showDialog("Error", "Not allowed during runtime", nullptr);
+        } else {
+            brushMenu = !brushMenu;
+        }
+    }
+    ToolUI::SameLine();
+    if(ToolUI::Button("Objects", toolbarButtonSize)) {
         if(!addObjectMenu && running) {
             showDialog("Error", "Not allowed during runtime", nullptr);
         } else {
@@ -207,9 +215,9 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
     }
 
-    // add object panel
-    if(addObjectMenu && toolbarActive && !running) {
-        ToolUI::Begin("Add object");
+    // brush panel
+    if(brushMenu && toolbarActive && !running) {
+        ToolUI::Begin("Brushes");
         // Special brushes
         ToolUI::Text("Tools");
         if(ToolUI::Button("Eraser")) {
@@ -234,16 +242,35 @@ void FreeplayScene::UICallback(Engine* engine) {
         ToolUI::End();
     }
     
+    // object panel
+    if(addObjectMenu && toolbarActive && !running) {
+        ToolUI::Begin("Objects");
+        ToolUI::InputFloat3("Create at", createPos);
+        if(ToolUI::Button("Puppet")) {
+            // create puppet
+            createObject("puppet", createPos, engine);
+        }
+        ToolUI::End();
+    }
+    
     // properties panel
     if(propertiesPanelType != CLOSED && toolbarActive && propertiesObject) {
         ToolUI::Begin("Object properties");
-        if(ToolUI::Button("Close")) {
+        bool close = ToolUI::Button("Close");
+        bool deleteObj = false;
+        if(propertiesPanelType == INTERACTIVE) {
+            ToolUI::SameLine();
+            deleteObj = ToolUI::Button("Delete");
+        }
+        if(close) {
             propertiesObject->updateTexture(propertiesObjectTexture);
 
             propertiesPanelType = CLOSED;
             propertiesObject = nullptr;
             propertiesObjectTexture = nullptr;
             textureSelection = false;
+        } else if(deleteObj) {
+            deleteObject(propertiesObject->id, engine);
         } else {
             bool shouldUpdate = false;
             if(ToolUI::TextField("Name", propertiesObject->name, true)) {
@@ -362,7 +389,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         }
     }
 
-    if(!eraseBrush) {
+    if(!eraseBrush && !running) {
         if(hotkeyToggle && engine->getKey(KeyCode::E) == PRESS) {
             if(!activeBrush) {
                 createBrush("erase", engine);
@@ -373,31 +400,39 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         }
     }
 
-    if(!activeBrush && !lastBrushName.empty()) {
+    if(!activeBrush && !lastBrushName.empty() && !running) {
         if(hotkeyToggle && engine->getKey(KeyCode::Q) == PRESS) {
             createBrush(lastBrushName, engine);
         }
     }
 
     static bool shiftCam = false;
-    if(!cameraMode && toolbarActive) {
-        if(hotkeyToggle && engine->getKey(KeyCode::C) == PRESS) {
+    static Vector3 prevBrushScale = {0.0f,0.0f,0.0f};
+    if(!cameraMode) {
+        if(hotkeyToggle && engine->getKey(KeyCode::C) == PRESS && !activeBrush) {
             cameraMode = true;
             setToolbarActive(false);
         } else if(hotkeyToggle && engine->getKey(KeyCode::LeftShift) == PRESS) {
             cameraMode = true;
             shiftCam = true;
             setToolbarActive(false);
+            if(activeBrush) {
+                prevBrushScale = brushObject->transform.scale;
+                brushObject->transform.scale = {0.0f,0.0f,0.0f};
+            }
         }
     } else if(shiftCam) {
         if(engine->getKey(KeyCode::LeftShift) == RELEASE) {
             cameraMode = false;
             shiftCam = false;
-            setToolbarActive(true);
+            if(!activeBrush) setToolbarActive(true);
+            else {
+                brushObject->transform.scale = prevBrushScale;
+            }
         }
     }
 
-    if(activeBrush) {
+    if(activeBrush && !cameraMode) {
         Vector3 origin;
         Vector3 direction;
 
@@ -509,6 +544,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         if(propertiesObject == object) {
                             propertiesPanelType = CLOSED;
                             propertiesObject = nullptr;
+                            textureSelection = false;
                         }
                         
                         engine->requestDestroyGameObject(object);
@@ -609,7 +645,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         static bool isLeftHeld;
         bool leftPress = engine->getMouseButton(MouseButton::Left) == PRESS;
 
-        if(leftPress && !isLeftHeld) {
+        if(hotkeyToggle && leftPress && !isLeftHeld) {
             isLeftHeld = true;
 
             Vector3 origin;
@@ -751,7 +787,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         if (haltedObjects == objectCount) {
             // run has finished
             // running = false;
-            haltedObjects = 0;
+            haltedObjects = -1;
             vmAccumulator = 0.0;
             std::cout << "Execution finished\n";
         }
@@ -832,11 +868,50 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
     setToolbarActive(false);
 }
 
+void FreeplayScene::createObject(const std::string& name, const Vector3& pos, Engine* engine) {
+    // prepare transform
+    auto objectTrans = baseTransform;
+    objectTrans.position = createPos;
+    // prepare name
+    auto objectID = getUniqueObjectName();
+    std::string objName = name + "_" + objectID;
+    // create and add level object
+    LevelObject levelObject = {objName, objectID, name, objectTrans, true, true};
+    levelState.AddObject(objectID, levelObject);
+    // instantiate object
+    InteractiveObject* newObject = static_cast<InteractiveObject*>(instantiateObject(engine, levelObject));
+    // get object data for resources
+    ObjectData data = getObjectData(name);
+    // active properties panel for new object
+    propertiesObject = newObject;
+    textureSelection = false;
+    propertiesObjectTexture = data.texture;
+    propertiesPanelType = INTERACTIVE;
+}
+
+void FreeplayScene::deleteObject(const std::string& id, Engine* engine) {
+    auto object = sceneEntities[id];
+    if(propertiesObject == object) {
+        propertiesPanelType = CLOSED;
+        propertiesObject = nullptr;
+        textureSelection = false;
+    }
+    engine->requestDestroyGameObject(object);
+    sceneEntities.erase(id);
+    auto it = std::find(objects.begin(), objects.end(), object);
+    if (it != objects.end()) {
+        std::swap(*it, objects.back());
+        objects.pop_back();
+    }
+    levelState.DeleteObject(id);
+}
+
 std::string FreeplayScene::getUniqueObjectName() {
-    return "Object" + std::to_string(objectIndex++);
+    return "Object" + std::to_string(levelState.objectCounter++);
 }
 
 void FreeplayScene::setToolbarActive(bool active) {
+    if(toolbarActive == active) return;
     targetToolbarY = active ? 0.0f : -70.0f;
     toolbarTime = 0.0f;
     toolbarY = active ? -70.0f : 0.0f;
@@ -857,7 +932,7 @@ ObjectData FreeplayScene::getObjectData(std::string objectName) {
     return {nullptr, nullptr};
 }
 
-void FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object) {
+Tile* FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object) {
     auto interactive = object.isInteractive;
     auto objectData = getObjectData(object.type);
     if(interactive) {
@@ -882,6 +957,7 @@ void FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object)
         // push to level
         sceneEntities[object.id] = instance;
         objects.push_back(instance);
+        return instance;
     } else {
         // Tile
         // instantiate game object
@@ -902,6 +978,7 @@ void FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object)
         // push to level
         sceneObjects[object.id] = instance;
         occupiedCells[gp] = object.name;
+        return instance;
     }
 }
 

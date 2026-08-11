@@ -65,7 +65,7 @@ protected:
     LevelState levelState;
 
     void instantiateLevel(Engine* engine);
-    void instantiateObject(Engine* engine, const LevelObject& object);
+    Tile* instantiateObject(Engine* engine, const LevelObject& object);
     
     void InitScene(Engine* engine) override;
     void UpdateScene(Engine* engine) override;
@@ -108,6 +108,7 @@ protected:
     std::string sourceCode; // for editor and blocks intermediate
     bool running = false;
     
+    bool brushMenu = false;
     bool addObjectMenu = false;
     bool activeBrush = false;
     bool eraseBrush = false;
@@ -119,8 +120,8 @@ protected:
     int brushZ = 0;
     float rot = 0.0f;
     GridPos prevGP;
+    Vector3 createPos;
 
-    int objectIndex = 0;
     std::string getUniqueObjectName();
 
     float toolbarY = 0.0f;
@@ -130,6 +131,8 @@ protected:
     bool toolbarAnimation = false;
 
     void createBrush(const std::string& name, Engine* engine);
+    void createObject(const std::string& name, const Vector3& pos, Engine* engine);
+    void deleteObject(const std::string& id, Engine* engine);
 
     // toggle between blocks and code
     bool codeMode = true; // PROD: false
