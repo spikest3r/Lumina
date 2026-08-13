@@ -7,7 +7,7 @@
 namespace {
 
 constexpr char kMagic[4] = { 'L', 'B', 'L', 'K' };
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2; // Bumped version for sub-stacks
 
 void WriteBytes(std::vector<uint8_t>& out, const void* data, size_t len) {
     const uint8_t* p = static_cast<const uint8_t*>(data);
@@ -25,9 +25,6 @@ void WriteString(std::vector<uint8_t>& out, const std::string& s) {
     WriteBytes(out, s.data(), s.size());
 }
 
-// Reads sizeof(T) bytes at `offset`, advances `offset`, returns true on
-// success. Returns false (leaving `offset`/`out` untouched) if the blob
-// doesn't have enough remaining bytes
 template <typename T>
 bool ReadPod(const std::vector<uint8_t>& in, size_t& offset, T& out) {
     static_assert(std::is_trivially_copyable<T>::value, "ReadPod requires a trivially copyable type");
@@ -62,13 +59,21 @@ struct ParsedBlock {
     uint64_t nextId = 0;
     uint64_t prevId = 0;
     std::vector<ParsedSlot> slots;
+    std::vector<uint64_t> subStacks;
 };
 
 bool IsKnownBlockTypeValue(uint32_t v) {
     return v == static_cast<uint32_t>(BlockType::HeadBlock) ||
            v == static_cast<uint32_t>(BlockType::MoveForward) ||
            v == static_cast<uint32_t>(BlockType::WaitUntilGround) ||
-           v == static_cast<uint32_t>(BlockType::Variable);
+           v == static_cast<uint32_t>(BlockType::SayText) ||
+           v == static_cast<uint32_t>(BlockType::SetVariable) ||
+           v == static_cast<uint32_t>(BlockType::Variable) ||
+           v == static_cast<uint32_t>(BlockType::GoToPos) ||
+           v == static_cast<uint32_t>(BlockType::If) ||
+           v == static_cast<uint32_t>(BlockType::IfElse) ||
+           v == static_cast<uint32_t>(BlockType::Forever) ||
+           v == static_cast<uint32_t>(BlockType::Repeat);
 }
 
 bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& outBlocks, uint64_t& outHeadId) {
@@ -76,12 +81,12 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
 
     char magic[4];
     if (!ReadPod(data, offset, magic) || std::memcmp(magic, kMagic, sizeof(kMagic)) != 0) {
-        return false; // not our format, or truncated
+        return false;
     }
 
     uint32_t version = 0;
-    if (!ReadPod(data, offset, version) || version != kVersion) {
-        return false; // unknown/future/old format — refuse rather than misparse
+    if (!ReadPod(data, offset, version) || (version != 1 && version != kVersion)) {
+        return false;
     }
 
     uint64_t headId = 0;
@@ -106,10 +111,8 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
         if (!ReadPod(data, offset, pb.nextId)) return false;
         if (!ReadPod(data, offset, pb.prevId)) return false;
 
-        if (pb.id == 0) return false; // 0 is the null sentinel, never a valid id
-        if (!IsKnownBlockTypeValue(pb.type)) {
-            return false; // unrecognized BlockType value, malformed or from a newer version
-        }
+        if (pb.id == 0) return false;
+        if (!IsKnownBlockTypeValue(pb.type)) return false;
 
         uint32_t slotCount = 0;
         if (!ReadPod(data, offset, slotCount)) return false;
@@ -125,25 +128,32 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
             ps.hasPlugged = (hasPlugged != 0);
 
             if (!ReadPod(data, offset, ps.pluggedId)) return false;
-            if (ps.hasPlugged && ps.pluggedId == 0) return false; // inconsistent: says plugged but no id
+            if (ps.hasPlugged && ps.pluggedId == 0) return false;
 
             pb.slots.push_back(std::move(ps));
+        }
+
+        if (version >= 2) {
+            uint32_t subStackCount = 0;
+            if (!ReadPod(data, offset, subStackCount)) return false;
+            pb.subStacks.reserve(subStackCount);
+            for (uint32_t s = 0; s < subStackCount; ++s) {
+                uint64_t subId = 0;
+                if (!ReadPod(data, offset, subId)) return false;
+                pb.subStacks.push_back(subId);
+            }
         }
 
         parsed.push_back(std::move(pb));
     }
 
-    if (headId == 0) return false; // must have designated a head
+    if (headId == 0) return false;
 
-    // --- Cross-reference validation ---
     auto findBlock = [&](uint64_t id) -> const ParsedBlock* {
         for (const auto& pb : parsed) if (pb.id == id) return &pb;
         return nullptr;
     };
-    auto idExists = [&](uint64_t id) {
-        if (id == 0) return true; // null is always "valid" as a reference
-        return findBlock(id) != nullptr;
-    };
+    auto idExists = [&](uint64_t id) { return id == 0 || findBlock(id) != nullptr; };
 
     bool foundHead = false;
     std::vector<uint8_t> claimedByNext(parsed.size(), 0);
@@ -160,27 +170,33 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
             if (pb.type != static_cast<uint32_t>(BlockType::HeadBlock)) return false;
             foundHead = true;
         }
-        // A slot-only type (Variable etc) must never appear in the stack axis.
         if (IsSlotOnlyBlockType(static_cast<BlockType>(pb.type))) {
-            if (pb.nextId != 0 || pb.prevId != 0) return false;
+            if (pb.nextId != 0 || pb.prevId != 0 || !pb.subStacks.empty()) return false;
         }
 
         if (pb.nextId != 0) {
             int idx = indexOfId(pb.nextId);
-            if (idx < 0) return false; // unreachable given idExists above, but stay safe
-            if (claimedByNext[idx] || claimedBySlot[idx]) return false; // double-claimed
+            if (idx < 0 || claimedByNext[idx] || claimedBySlot[idx]) return false;
             claimedByNext[idx] = 1;
         }
 
         for (const auto& ps : pb.slots) {
             if (!ps.hasPlugged) continue;
-            if (!idExists(ps.pluggedId)) return false;
             int idx = indexOfId(ps.pluggedId);
-            if (idx < 0) return false;
-            if (claimedByNext[idx] || claimedBySlot[idx]) return false; // double-claimed
+            if (idx < 0 || claimedByNext[idx] || claimedBySlot[idx]) return false;
             claimedBySlot[idx] = 1;
             const ParsedBlock* child = findBlock(ps.pluggedId);
             if (!child || !IsSlotOnlyBlockType(static_cast<BlockType>(child->type))) return false;
+        }
+
+        for (uint64_t subId : pb.subStacks) {
+            if (subId != 0) {
+                int idx = indexOfId(subId);
+                if (idx < 0 || claimedByNext[idx] || claimedBySlot[idx]) return false;
+                claimedByNext[idx] = 1; // Treated as a valid starting chain
+                const ParsedBlock* child = findBlock(subId);
+                if (!child || IsSlotOnlyBlockType(static_cast<BlockType>(child->type))) return false;
+            }
         }
     }
     if (!foundHead) return false;
@@ -190,27 +206,32 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
         uint64_t cur = headId;
         while (cur != 0) {
             int idx = indexOfId(cur);
-            if (idx < 0) return false;
-            if (visited[idx]) return false; // cycle
+            if (idx < 0 || visited[idx]) return false;
             visited[idx] = 1;
             cur = parsed[idx].nextId;
         }
 
         for (size_t i = 0; i < parsed.size(); ++i) {
-            std::vector<uint8_t> slotVisited(parsed.size(), 0);
-            // local DFS over the plug graph starting at block i
+            std::vector<uint8_t> nodeVisited(parsed.size(), 0);
             std::vector<size_t> stack;
             stack.push_back(i);
             while (!stack.empty()) {
                 size_t node = stack.back();
                 stack.pop_back();
-                if (slotVisited[node]) return false; // cycle reachable from i
-                slotVisited[node] = 1;
+                if (nodeVisited[node]) return false;
+                nodeVisited[node] = 1;
+                
                 for (const auto& ps : parsed[node].slots) {
-                    if (!ps.hasPlugged) continue;
-                    int childIdx = indexOfId(ps.pluggedId);
-                    if (childIdx < 0) return false;
-                    stack.push_back(static_cast<size_t>(childIdx));
+                    if (ps.hasPlugged) {
+                        int childIdx = indexOfId(ps.pluggedId);
+                        if (childIdx >= 0) stack.push_back(static_cast<size_t>(childIdx));
+                    }
+                }
+                for (uint64_t subId : parsed[node].subStacks) {
+                    if (subId != 0) {
+                        int childIdx = indexOfId(subId);
+                        if (childIdx >= 0) stack.push_back(static_cast<size_t>(childIdx));
+                    }
                 }
             }
         }
@@ -230,8 +251,6 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
 void BlockEditor::Init() {
     Cleanup();
     
-    // Spawn the permanent head block. Fixed position; not draggable, not
-    // deletable, always exists. Everything in the "main" pile hangs off it.
     m_blocks.push_back(std::make_unique<Block>());
     m_headBlock = m_blocks.back().get();
     m_headBlock->id = NextId();
@@ -243,15 +262,35 @@ void BlockEditor::Init() {
 
 void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::MoveForward, "Move Forward", IM_COL32(90, 140, 210, 255),
-                           { SlotTemplate{ "value", "0" } } });
+                           { SlotTemplate{ "value", "5" } } });
+
+    m_palette.push_back({ BlockType::GoToPos, "Go to Position", IM_COL32(90, 140, 210, 255),
+                           { SlotTemplate{ "X", "0" }, SlotTemplate{ "Y", "0" } } });
 
     m_palette.push_back({ BlockType::WaitUntilGround, "Wait Until Ground", IM_COL32(90, 140, 210, 255),
                            { } });
 
+    m_palette.push_back({ BlockType::SayText, "Say Text", IM_COL32(210, 90, 140, 255),
+                           { SlotTemplate {"text", "Hello, world!"} } });
+
+    m_palette.push_back({ BlockType::SetVariable, "Set Variable", IM_COL32(150, 100, 200, 255),
+                           { SlotTemplate{ "name", "myVar" }, SlotTemplate{ "value", "0" } } });
+
     m_palette.push_back({ BlockType::Variable, "Variable", IM_COL32(150, 100, 200, 255),
                            { SlotTemplate{ "name", "myVar" } } });
 
-    // (If, Repeat, MoveTo, SetVar, ...).
+    // New control flow blocks
+    m_palette.push_back({ BlockType::If, "If", IM_COL32(220, 160, 40, 255),
+                           { SlotTemplate{"condition", "true"} }, 1, {""} });
+
+    m_palette.push_back({ BlockType::IfElse, "If Else", IM_COL32(220, 160, 40, 255),
+                           { SlotTemplate{"condition", "true"} }, 2, {"", "else"} });
+
+    m_palette.push_back({ BlockType::Forever, "Forever", IM_COL32(220, 160, 40, 255),
+                           { }, 1, {""} });
+
+    m_palette.push_back({ BlockType::Repeat, "Repeat", IM_COL32(220, 160, 40, 255),
+                           { SlotTemplate{"times", "10"} }, 1, {""} });
 }
 
 Block* BlockEditor::SpawnBlock(BlockType type, const std::string& label, ImVec2 pos) {
@@ -262,7 +301,6 @@ Block* BlockEditor::SpawnBlock(BlockType type, const std::string& label, ImVec2 
     b->label = label;
     b->pos = pos;
 
-    // Copy this type's fixed field list from its palette template, if any.
     for (const auto& tmpl : m_palette) {
         if (tmpl.type == type) {
             b->slots.reserve(tmpl.slots.size());
@@ -272,6 +310,8 @@ Block* BlockEditor::SpawnBlock(BlockType type, const std::string& label, ImVec2 
                 s.text = st.defaultText;
                 b->slots.push_back(std::move(s));
             }
+            b->subStacks.resize(tmpl.subStackCount, nullptr);
+            b->subStackLabels = tmpl.subStackLabels;
             break;
         }
     }
@@ -281,13 +321,66 @@ Block* BlockEditor::SpawnBlock(BlockType type, const std::string& label, ImVec2 
 }
 
 void BlockEditor::LayoutBlock(Block* block) {
+    UpdateBlockLayout(block);
+}
+
+void BlockEditor::UpdateLayouts() {
+    for (auto& up : m_blocks) {
+        if (!up->IsPluggedIn() && !up->IsInSubStack()) {
+            Block* cur = up.get();
+            while (cur) {
+                UpdateBlockLayout(cur);
+                cur = cur->next;
+            }
+        }
+    }
+}
+
+void BlockEditor::UpdateBlockLayout(Block* block) {
     if (!block) return;
-    float width = 200.0f;
-    float height = block->slots.empty()
-        ? 50.0f
-        : kBlockHeaderHeight + kSlotRowHeight * static_cast<float>(block->slots.size()) + 6.0f;
+
+    float width = block->IsSlotOnly() ? 140.0f : 200.0f;
+
+    if (block->slots.empty() && block->subStacks.empty()) {
+        block->size = ImVec2(width, block->IsSlotOnly() ? 28.0f : 50.0f);
+        return;
+    }
+
+    float height = kBlockHeaderHeight + 6.0f;
+    for (auto& slot : block->slots) {
+        float rowHeight = kSlotRowHeight;
+        if (slot.plugged) {
+            UpdateBlockLayout(slot.plugged);
+            rowHeight = std::max(rowHeight, slot.plugged->size.y + 4.0f);
+        }
+        height += rowHeight;
+    }
+
+    for (size_t i = 0; i < block->subStacks.size(); ++i) {
+        if (i > 0 && i < block->subStackLabels.size() && !block->subStackLabels[i].empty()) {
+            height += 24.0f; 
+        }
+        float stackHeight = kSubStackMinHeight;
+        if (block->subStacks[i]) {
+            float chainHeight = 0;
+            Block* cur = block->subStacks[i];
+            while (cur) {
+                UpdateBlockLayout(cur);
+                chainHeight += cur->size.y;
+                cur = cur->next;
+            }
+            stackHeight = std::max(stackHeight, chainHeight);
+        }
+        height += stackHeight;
+    }
+
+    if (!block->subStacks.empty()) {
+        height += kBottomBarHeight;
+    }
+
     block->size = ImVec2(width, height);
 }
+
 
 void BlockEditor::Update() {
     UpdateDragFromPalette();
@@ -295,6 +388,7 @@ void BlockEditor::Update() {
     UpdateSlotTargeting();
     UpdateDragExistingBlock();
     UpdateDeletion();
+    UpdateLayouts(); 
 }
 
 void BlockEditor::UpdateDragFromPalette() {
@@ -325,8 +419,9 @@ void BlockEditor::UpdateDragFromPalette() {
 
             m_draggingBlock = spawned;
             m_dragGrabOffset = grabOffset;
-            m_dragJustStarted = false; // freshly spawned
+            m_dragJustStarted = false;
             m_dragWasPluggedIn = false;
+            m_dragWasInSubStack = false;
         }
         m_draggingFromPalette = false;
         m_paletteDragIndex = -1;
@@ -340,6 +435,8 @@ void BlockEditor::UpdateDragExistingBlock() {
         if (m_dragJustStarted) {
             if (m_dragWasPluggedIn) {
                 UnplugFromSlot(m_draggingBlock);
+            } else if (m_dragWasInSubStack) {
+                UnplugFromSubStack(m_draggingBlock);
             } else {
                 DetachFromChain(m_draggingBlock);
             }
@@ -353,52 +450,83 @@ void BlockEditor::UpdateDragExistingBlock() {
         if (!m_draggingBlock->IsHead()) {
             if (m_slotTargetOwner && m_slotTargetIndex >= 0) {
                 PlugIntoSlot(m_slotTargetOwner, m_slotTargetIndex, m_draggingBlock);
+            } else if (m_snapSubStackOwner && m_snapSubStackIndex >= 0) {
+                PlugIntoSubStack(m_snapSubStackOwner, m_snapSubStackIndex, m_draggingBlock);
             } else if (m_snapTarget) {
                 InsertAfter(m_snapTarget, m_draggingBlock);
             }
         }
         m_snapTarget = nullptr;
+        m_snapSubStackOwner = nullptr;
+        m_snapSubStackIndex = -1;
         m_slotTargetOwner = nullptr;
         m_slotTargetIndex = -1;
         m_draggingBlock = nullptr;
         m_dragWasPluggedIn = false;
+        m_dragWasInSubStack = false;
     }
 }
 
 void BlockEditor::UpdateSnapping() {
     m_snapTarget = nullptr;
-    if (!m_draggingBlock) return;
-    if (m_draggingBlock->IsHead()) return; // head never snaps under anything
-    if (m_draggingBlock->IsSlotOnly()) return; // slot-only types never join the stack
+    m_snapSubStackOwner = nullptr;
+    m_snapSubStackIndex = -1;
 
-    // Never allow snapping onto the block currently being dragged, or the
-    // head block being treated as anything other than a valid anchor target
-    // (head block itself is always a valid snap target since it's the pile root).
+    if (!m_draggingBlock) return;
+    if (m_draggingBlock->IsHead()) return;
+    if (m_draggingBlock->IsSlotOnly()) return;
+
     Block* best = nullptr;
+    Block* bestSubStackOwner = nullptr;
+    int bestSubStackIdx = -1;
     float bestDist = kSnapDistance;
+
+    ImVec2 dragTop = m_draggingBlock->pos;
 
     for (auto& up : m_blocks) {
         Block* candidate = up.get();
         if (candidate == m_draggingBlock) continue;
-        if (candidate->IsSlotOnly()) continue; // slot-only types are never stack anchors either
-        if (candidate->IsPluggedIn()) continue; // a block sitting in a slot is not a stack tail
+        if (candidate->IsSlotOnly()) continue;
+        if (candidate->IsPluggedIn()) continue;
 
         if (IsInChainStartingAt(m_draggingBlock, candidate)) continue;
+        if (IsDescendantViaChildren(m_draggingBlock, candidate)) continue;
 
-        if (candidate->next != nullptr) continue;
+        // Check normal stack snap
+        if (candidate->next == nullptr) {
+            ImVec2 candidatePos = EffectivePos(candidate);
+            ImVec2 slot = ImVec2(candidatePos.x, candidatePos.y + candidate->size.y);
+            float dist = std::abs(slot.x - dragTop.x) + std::abs(slot.y - dragTop.y);
 
-        ImVec2 candidatePos = EffectivePos(candidate);
-        ImVec2 slot = ImVec2(candidatePos.x, candidatePos.y + candidate->size.y);
-        ImVec2 dragTop = m_draggingBlock->pos; // dragging block is always a chain root, ->pos is authoritative
-        float dist = std::abs(slot.x - dragTop.x) + std::abs(slot.y - dragTop.y);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = candidate;
+                bestSubStackOwner = nullptr;
+                bestSubStackIdx = -1;
+            }
+        }
 
-        if (dist < bestDist) {
-            bestDist = dist;
-            best = candidate;
+        // Check empty sub-stacks
+        for (size_t i = 0; i < candidate->subStacks.size(); ++i) {
+            if (candidate->subStacks[i] == nullptr) {
+                ImVec2 candidatePos = EffectivePos(candidate);
+                ImVec2 offset = SubStackOffset(candidate, static_cast<int>(i));
+                ImVec2 slot = ImVec2(candidatePos.x + offset.x, candidatePos.y + offset.y);
+                float dist = std::abs(slot.x - dragTop.x) + std::abs(slot.y - dragTop.y);
+
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = nullptr;
+                    bestSubStackOwner = candidate;
+                    bestSubStackIdx = static_cast<int>(i);
+                }
+            }
         }
     }
 
     m_snapTarget = best;
+    m_snapSubStackOwner = bestSubStackOwner;
+    m_snapSubStackIndex = bestSubStackIdx;
 }
 
 void BlockEditor::UpdateSlotTargeting() {
@@ -408,10 +536,10 @@ void BlockEditor::UpdateSlotTargeting() {
     bool draggingSlotOnlyFromPalette = m_draggingFromPalette &&
         m_paletteDragIndex >= 0 &&
         IsSlotOnlyBlockType(m_palette[m_paletteDragIndex].type);
-    bool draggingExistingBlock = (m_draggingBlock != nullptr);
+    bool draggingExistingBlock = (m_draggingBlock != nullptr && m_draggingBlock->IsSlotOnly());
 
     if (!draggingSlotOnlyFromPalette && !draggingExistingBlock) return;
-    if (draggingExistingBlock && m_draggingBlock->IsHead()) return; // head can never be plugged anywhere
+    if (draggingExistingBlock && m_draggingBlock->IsHead()) return;
 
     ImVec2 mouse = ImGui::GetIO().MousePos;
     ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x, mouse.y - m_canvasScreenOrigin.y);
@@ -423,14 +551,11 @@ void BlockEditor::UpdateSlotTargeting() {
         Block* owner = up.get();
         if (draggingExistingBlock) {
             if (owner == m_draggingBlock) continue;
-            // Refuse plugging a block into a slot belonging to itself or
-            // any of its own descendants (stack or slot) — that would be
-            // a cycle. IsDescendantViaSlots covers both axes.
-            if (IsDescendantViaSlots(m_draggingBlock, owner)) continue;
+            if (IsDescendantViaChildren(m_draggingBlock, owner)) continue;
         }
 
         for (size_t i = 0; i < owner->slots.size(); ++i) {
-            if (owner->slots[i].plugged != nullptr) continue; // slot already occupied
+            if (owner->slots[i].plugged != nullptr) continue;
 
             ImVec2 ownerPos = EffectivePos(owner);
             ImVec2 rowOffset = SlotRowOffset(owner, static_cast<int>(i));
@@ -441,7 +566,7 @@ void BlockEditor::UpdateSlotTargeting() {
                 mouseCanvas.y >= fieldMin.y && mouseCanvas.y <= fieldMax.y) {
                 bestOwner = owner;
                 bestIndex = static_cast<int>(i);
-                break; // mouse can only be over one field at a time
+                break;
             }
         }
         if (bestOwner) break;
@@ -459,10 +584,13 @@ void BlockEditor::UpdateDeletion() {
         Block* toDelete = m_draggingBlock;
         m_draggingBlock = nullptr;
         m_snapTarget = nullptr;
+        m_snapSubStackOwner = nullptr;
+        m_snapSubStackIndex = -1;
         m_slotTargetOwner = nullptr;
         m_slotTargetIndex = -1;
         m_dragJustStarted = false;
         m_dragWasPluggedIn = false;
+        m_dragWasInSubStack = false;
         DeleteChain(toDelete);
         return;
     }
@@ -486,8 +614,9 @@ void BlockEditor::DetachFromChain(Block* block) {
 
 void BlockEditor::InsertAfter(Block* anchor, Block* block) {
     if (!anchor || !block || anchor == block) return;
-    if (block->IsSlotOnly()) return; // slot-only types never join the stack
-    if (block->IsPluggedIn()) return; // must be detached from its slot first (see UnplugFromSlot)
+    if (block->IsSlotOnly()) return;
+    if (block->IsPluggedIn()) return;
+    if (block->IsInSubStack()) return; 
 
     if (IsInChainStartingAt(block, anchor)) return;
 
@@ -495,8 +624,6 @@ void BlockEditor::InsertAfter(Block* anchor, Block* block) {
     anchor->next = block;
     block->prev = anchor;
 
-    // If block already has a tail (dragged a mid-chain segment in), splice
-    // the anchor's old tail onto the end of that dragged segment.
     Block* tail = block;
     while (tail->next) tail = tail->next;
     tail->next = oldNext;
@@ -507,10 +634,11 @@ void BlockEditor::InsertAfter(Block* anchor, Block* block) {
 
 namespace {
 template <typename Editor>
-void ClearDanglingRefs(Editor* ed, Block* cur, Block*& snapTarget, Block*& hoveredBlock,
-                        Block*& draggingBlock, Block*& slotTargetOwner, int& slotTargetIndex) {
+void ClearDanglingRefs(Editor* ed, Block* cur, Block*& snapTarget, Block*& snapSubTarget, int& snapSubIndex,
+                        Block*& hoveredBlock, Block*& draggingBlock, Block*& slotTargetOwner, int& slotTargetIndex) {
     (void)ed;
     if (snapTarget == cur) snapTarget = nullptr;
+    if (snapSubTarget == cur) { snapSubTarget = nullptr; snapSubIndex = -1; }
     if (hoveredBlock == cur) hoveredBlock = nullptr;
     if (draggingBlock == cur) draggingBlock = nullptr;
     if (slotTargetOwner == cur) { slotTargetOwner = nullptr; slotTargetIndex = -1; }
@@ -524,23 +652,31 @@ void BlockEditor::DeleteBlock(Block* block) {
         if (slot.plugged) {
             Block* child = slot.plugged;
             slot.plugged = nullptr;
-            DeleteBlock(child); // child is slot-only, never has a ->next tail to worry about
+            DeleteBlock(child);
         }
     }
 
-    // If THIS block was itself plugged into someone else's slot, clear
-    // that owner's pointer to it so nothing dangles.
+    for (Block* sub : block->subStacks) {
+        if (sub) {
+            DeleteChain(sub);
+        }
+    }
+
     if (block->slotParent && block->slotParentIndex >= 0 &&
         static_cast<size_t>(block->slotParentIndex) < block->slotParent->slots.size()) {
         block->slotParent->slots[block->slotParentIndex].plugged = nullptr;
     }
 
-    // Reconnect around the single removed block so the rest of its chain
-    // (both above and below) stays intact and doesn't get orphaned.
+    if (block->parentSubStack && block->parentSubStackIndex >= 0 &&
+        static_cast<size_t>(block->parentSubStackIndex) < block->parentSubStack->subStacks.size()) {
+        block->parentSubStack->subStacks[block->parentSubStackIndex] = nullptr;
+    }
+
     if (block->prev) block->prev->next = block->next;
     if (block->next) block->next->prev = block->prev;
 
-    ClearDanglingRefs(this, block, m_snapTarget, m_hoveredBlock, m_draggingBlock, m_slotTargetOwner, m_slotTargetIndex);
+    ClearDanglingRefs(this, block, m_snapTarget, m_snapSubStackOwner, m_snapSubStackIndex,
+                      m_hoveredBlock, m_draggingBlock, m_slotTargetOwner, m_slotTargetIndex);
 
     m_blocks.erase(
         std::remove_if(m_blocks.begin(), m_blocks.end(),
@@ -552,12 +688,11 @@ void BlockEditor::DeleteChain(Block* chainStart) {
     if (!chainStart || chainStart->IsHead()) return;
 
     if (chainStart->prev) chainStart->prev->next = nullptr;
+    if (chainStart->parentSubStack) chainStart->parentSubStack->subStacks[chainStart->parentSubStackIndex] = nullptr;
 
     for (Block* cur = chainStart; cur; ) {
         Block* next = cur->next;
 
-        // Free anything plugged into cur's own slots (recursively — a
-        // plugged-in block can itself have further plugged-in blocks).
         for (auto& slot : cur->slots) {
             if (slot.plugged) {
                 Block* child = slot.plugged;
@@ -565,8 +700,13 @@ void BlockEditor::DeleteChain(Block* chainStart) {
                 DeleteBlock(child);
             }
         }
+        
+        for (Block* sub : cur->subStacks) {
+            if (sub) DeleteChain(sub);
+        }
 
-        ClearDanglingRefs(this, cur, m_snapTarget, m_hoveredBlock, m_draggingBlock, m_slotTargetOwner, m_slotTargetIndex);
+        ClearDanglingRefs(this, cur, m_snapTarget, m_snapSubStackOwner, m_snapSubStackIndex,
+                          m_hoveredBlock, m_draggingBlock, m_slotTargetOwner, m_slotTargetIndex);
 
         m_blocks.erase(
             std::remove_if(m_blocks.begin(), m_blocks.end(),
@@ -580,11 +720,11 @@ void BlockEditor::DeleteChain(Block* chainStart) {
 void BlockEditor::PlugIntoSlot(Block* owner, int slotIndex, Block* block) {
     if (!owner || !block) return;
     if (slotIndex < 0 || static_cast<size_t>(slotIndex) >= owner->slots.size()) return;
-    if (owner->slots[slotIndex].plugged != nullptr) return; // occupied — caller must unplug/clear first
-    if (block->prev != nullptr || block->next != nullptr) return; // must be a detached stack root, not mid-chain
-    if (block->IsHead()) return; // head can never be plugged anywhere
+    if (owner->slots[slotIndex].plugged != nullptr) return;
+    if (block->prev != nullptr || block->next != nullptr) return;
+    if (block->IsHead()) return;
     if (block == owner) return;
-    if (IsDescendantViaSlots(block, owner)) return; // would create a cycle (owner is reachable from block already)
+    if (IsDescendantViaChildren(block, owner)) return;
 
     owner->slots[slotIndex].plugged = block;
     block->slotParent = owner;
@@ -596,11 +736,10 @@ void BlockEditor::UnplugFromSlot(Block* block) {
 
     Block* owner = block->slotParent;
     int idx = block->slotParentIndex;
-
     ImVec2 currentPos = EffectivePos(block);
 
     if (idx >= 0 && static_cast<size_t>(idx) < owner->slots.size() && owner->slots[idx].plugged == block) {
-        owner->slots[idx].plugged = nullptr; // reveals owner->slots[idx].text again automatically
+        owner->slots[idx].plugged = nullptr;
     }
 
     block->slotParent = nullptr;
@@ -608,17 +747,47 @@ void BlockEditor::UnplugFromSlot(Block* block) {
     block->pos = currentPos;
 }
 
-bool BlockEditor::IsDescendantViaSlots(Block* root, Block* candidate) const {
+void BlockEditor::PlugIntoSubStack(Block* owner, int subStackIndex, Block* block) {
+    if (!owner || !block) return;
+    if (subStackIndex < 0 || static_cast<size_t>(subStackIndex) >= owner->subStacks.size()) return;
+    if (owner->subStacks[subStackIndex] != nullptr) return;
+    if (block->prev != nullptr) return; // Must be a chain root
+    if (block->IsHead()) return;
+    if (block == owner) return;
+    if (IsDescendantViaChildren(block, owner)) return;
+
+    owner->subStacks[subStackIndex] = block;
+    block->parentSubStack = owner;
+    block->parentSubStackIndex = subStackIndex;
+}
+
+void BlockEditor::UnplugFromSubStack(Block* block) {
+    if (!block || !block->parentSubStack) return;
+
+    Block* owner = block->parentSubStack;
+    int idx = block->parentSubStackIndex;
+    ImVec2 currentPos = EffectivePos(block);
+
+    if (idx >= 0 && static_cast<size_t>(idx) < owner->subStacks.size() && owner->subStacks[idx] == block) {
+        owner->subStacks[idx] = nullptr;
+    }
+
+    block->parentSubStack = nullptr;
+    block->parentSubStackIndex = -1;
+    block->pos = currentPos;
+}
+
+bool BlockEditor::IsDescendantViaChildren(Block* root, Block* candidate) const {
     if (!root || !candidate) return false;
     if (root == candidate) return true;
 
-    // Stack axis: candidate reachable by following ->next from root.
     for (Block* cur = root; cur; cur = cur->next) {
         if (cur == candidate) return true;
-        // Slot axis from each stacked block along the way: anything
-        // plugged into cur's slots, recursively.
         for (const auto& slot : cur->slots) {
-            if (slot.plugged && IsDescendantViaSlots(slot.plugged, candidate)) return true;
+            if (slot.plugged && IsDescendantViaChildren(slot.plugged, candidate)) return true;
+        }
+        for (Block* sub : cur->subStacks) {
+            if (sub && IsDescendantViaChildren(sub, candidate)) return true;
         }
     }
     return false;
@@ -628,14 +797,18 @@ ImVec2 BlockEditor::EffectivePos(const Block* block) const {
     if (!block) return ImVec2(0, 0);
 
     if (block->slotParent) {
-        // Plugged-in child: parent's effective position + that slot's row
-        // offset within the parent's body.
         ImVec2 parentPos = EffectivePos(block->slotParent);
         ImVec2 rowOffset = SlotRowOffset(block->slotParent, block->slotParentIndex);
         return ImVec2(parentPos.x + rowOffset.x, parentPos.y + rowOffset.y);
     }
 
-    if (!block->prev) return block->pos; // chain root — ->pos is authoritative
+    if (block->parentSubStack) {
+        ImVec2 parentPos = EffectivePos(block->parentSubStack);
+        ImVec2 offset = SubStackOffset(block->parentSubStack, block->parentSubStackIndex);
+        return ImVec2(parentPos.x + offset.x, parentPos.y + offset.y);
+    }
+
+    if (!block->prev) return block->pos;
 
     ImVec2 rootPos = EffectivePos(block->prev);
     return ImVec2(rootPos.x, rootPos.y + block->prev->size.y);
@@ -643,9 +816,49 @@ ImVec2 BlockEditor::EffectivePos(const Block* block) const {
 
 ImVec2 BlockEditor::SlotRowOffset(const Block* owner, int slotIndex) const {
     if (!owner || slotIndex < 0) return ImVec2(0, 0);
-    float y = kBlockHeaderHeight + kSlotRowHeight * static_cast<float>(slotIndex);
-    float x = owner->size.x - kSlotFieldWidth - 10.0f; // right-aligned within the block body, small margin
+    
+    float y = kBlockHeaderHeight;
+    for (int i = 0; i < slotIndex; ++i) {
+        float rowHeight = kSlotRowHeight;
+        if (owner->slots[i].plugged) {
+            rowHeight = std::max(rowHeight, owner->slots[i].plugged->size.y + 4.0f);
+        }
+        y += rowHeight;
+    }
+    
+    float x = owner->size.x - kSlotFieldWidth - 10.0f;
     return ImVec2(x, y);
+}
+
+ImVec2 BlockEditor::SubStackOffset(const Block* owner, int subStackIndex) const {
+    if (!owner || subStackIndex < 0) return ImVec2(0, 0);
+
+    float y = kBlockHeaderHeight;
+    for (int i = 0; i < owner->slots.size(); ++i) {
+        float rH = kSlotRowHeight;
+        if (owner->slots[i].plugged) rH = std::max(rH, owner->slots[i].plugged->size.y + 4.0f);
+        y += rH;
+    }
+
+    for (int i = 0; i < subStackIndex; ++i) {
+        if (i > 0 && i < owner->subStackLabels.size() && !owner->subStackLabels[i].empty()) {
+            y += 24.0f;
+        }
+        float stackHeight = kSubStackMinHeight;
+        if (owner->subStacks[i]) {
+            float chainH = 0;
+            Block* c = owner->subStacks[i];
+            while(c) { chainH += c->size.y; c = c->next; }
+            stackHeight = std::max(stackHeight, chainH);
+        }
+        y += stackHeight;
+    }
+
+    if (subStackIndex > 0 && subStackIndex < owner->subStackLabels.size() && !owner->subStackLabels[subStackIndex].empty()) {
+        y += 24.0f;
+    }
+
+    return ImVec2(kSubStackIndent, y);
 }
 
 Block* BlockEditor::ChainRoot(Block* block) const {
@@ -713,24 +926,29 @@ void BlockEditor::DrawCanvas() {
                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
     ImVec2 canvasOrigin = ImGui::GetCursorScreenPos();
-    m_canvasScreenOrigin = canvasOrigin; // cache for Update() to convert mouse screen-pos -> canvas-space
+    m_canvasScreenOrigin = canvasOrigin;
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    // Reset every frame before re-detecting below. Without this, moving the
-    // mouse off every block (e.g. onto empty canvas or the sidebar) would
-    // leave last frame's target permanently armed for Delete.
     m_hoveredBlock = nullptr;
 
     for (auto& up : m_blocks) {
         Block* b = up.get();
-        if (b->IsPluggedIn()) continue;
+        if (b->IsPluggedIn() || b->IsInSubStack()) continue; // Let the owner draw it
         DrawBlock(dl, canvasOrigin, b, /*isDragGhost=*/false);
     }
 
-    if (m_draggingBlock && m_snapTarget) {
-        ImVec2 slotPos = GetChainSlotScreenPos(canvasOrigin, m_snapTarget);
-        ImVec2 slotMax = ImVec2(slotPos.x + m_snapTarget->size.x, slotPos.y + 6.0f);
-        dl->AddRectFilled(slotPos, slotMax, IM_COL32(255, 220, 80, 200), 3.0f);
+    if (m_draggingBlock) {
+        if (m_snapTarget) {
+            ImVec2 slotPos = GetChainSlotScreenPos(canvasOrigin, m_snapTarget);
+            ImVec2 slotMax = ImVec2(slotPos.x + m_snapTarget->size.x, slotPos.y + 6.0f);
+            dl->AddRectFilled(slotPos, slotMax, IM_COL32(255, 220, 80, 200), 3.0f);
+        } else if (m_snapSubStackOwner && m_snapSubStackIndex >= 0) {
+            ImVec2 ownerPos = EffectivePos(m_snapSubStackOwner);
+            ImVec2 offset = SubStackOffset(m_snapSubStackOwner, m_snapSubStackIndex);
+            ImVec2 slotPos = ImVec2(canvasOrigin.x + ownerPos.x + offset.x, canvasOrigin.y + ownerPos.y + offset.y);
+            ImVec2 slotMax = ImVec2(slotPos.x + m_snapSubStackOwner->size.x - offset.x, slotPos.y + 6.0f);
+            dl->AddRectFilled(slotPos, slotMax, IM_COL32(255, 220, 80, 200), 3.0f);
+        }
     }
 
     if (m_slotTargetOwner && m_slotTargetIndex >= 0) {
@@ -747,32 +965,88 @@ void BlockEditor::DrawCanvas() {
     ImGui::EndChild();
 }
 
+ImU32 BlockEditor::GetBlockColor(BlockType type) const {
+    if (type == BlockType::HeadBlock) return IM_COL32(200, 90, 90, 255);
+    for (const auto& tmpl : m_palette) {
+        if (tmpl.type == type) return tmpl.color;
+    }
+    return IsSlotOnlyBlockType(type) ? IM_COL32(150, 100, 200, 255) : IM_COL32(90, 140, 210, 255);
+}
+
 void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 canvasOrigin, Block* block, bool isDragGhost) {
     ImVec2 effPos = EffectivePos(block);
     ImVec2 blockMin = ImVec2(canvasOrigin.x + effPos.x, canvasOrigin.y + effPos.y);
     ImVec2 blockMax = ImVec2(blockMin.x + block->size.x, blockMin.y + block->size.y);
 
-    ImU32 bodyColor = block->IsHead() ? IM_COL32(200, 90, 90, 255)
-                     : block->IsSlotOnly() ? IM_COL32(150, 100, 200, 255)
-                     : IM_COL32(90, 140, 210, 255);
-    ImU32 borderColor = block->IsHead() ? IM_COL32(120, 40, 40, 255)
-                       : block->IsSlotOnly() ? IM_COL32(90, 60, 130, 255)
-                       : IM_COL32(40, 70, 110, 255);
+    ImU32 bodyColor = GetBlockColor(block->type);
+    
+    ImU8 r = bodyColor & 0xFF;
+    ImU8 g = (bodyColor >> 8) & 0xFF;
+    ImU8 b = (bodyColor >> 16) & 0xFF;
+    ImU8 a = (bodyColor >> 24) & 0xFF;
+    ImU32 borderColor = IM_COL32(std::max(0, r - 50), std::max(0, g - 50), std::max(0, b - 50), a);
 
-    float rounding = block->IsSlotOnly() ? (block->size.y * 0.5f) : 8.0f; // pill shape for slot-only blocks
-    dl->AddRectFilled(blockMin, blockMax, bodyColor, rounding);
-    dl->AddRect(blockMin, blockMax, borderColor, rounding, 0, 2.0f);
+    float rounding = block->IsSlotOnly() ? std::min(block->size.y * 0.5f, 14.0f) : 8.0f;
+
+    if (block->subStacks.empty()) {
+        dl->AddRectFilled(blockMin, blockMax, bodyColor, rounding);
+        dl->AddRect(blockMin, blockMax, borderColor, rounding, 0, 2.0f);
+    } else {
+        // C-Shape drawing
+        float topH = kBlockHeaderHeight + 6.0f;
+        for (auto& s : block->slots) {
+            float rH = kSlotRowHeight;
+            if (s.plugged) rH = std::max(rH, s.plugged->size.y + 4.0f);
+            topH += rH;
+        }
+
+        // Top bar
+        dl->AddRectFilled(blockMin, ImVec2(blockMax.x, blockMin.y + topH), bodyColor, rounding, ImDrawFlags_RoundCornersTop);
+        dl->AddLine(ImVec2(blockMin.x + rounding, blockMin.y), ImVec2(blockMax.x - rounding, blockMin.y), borderColor, 2.0f);
+        
+        float curY = blockMin.y + topH;
+        for (size_t i = 0; i < block->subStacks.size(); ++i) {
+            if (i > 0) {
+                float midH = 24.0f;
+                dl->AddRectFilled(ImVec2(blockMin.x, curY), ImVec2(blockMax.x, curY + midH), bodyColor, 0);
+                if (i < block->subStackLabels.size()) {
+                    dl->AddText(ImVec2(blockMin.x + 12, curY + 4), IM_COL32(230, 230, 230, 255), block->subStackLabels[i].c_str());
+                }
+                curY += midH;
+            }
+            
+            float stackH = kSubStackMinHeight;
+            if (block->subStacks[i]) {
+                float chainH = 0; Block* c = block->subStacks[i];
+                while(c) { chainH += c->size.y; c = c->next; }
+                stackH = std::max(stackH, chainH);
+            }
+            // Left spine
+            dl->AddRectFilled(ImVec2(blockMin.x, curY), ImVec2(blockMin.x + kSubStackIndent, curY + stackH), bodyColor, 0);
+            curY += stackH;
+        }
+        
+        // Bottom bar
+        dl->AddRectFilled(ImVec2(blockMin.x, curY), ImVec2(blockMax.x, curY + kBottomBarHeight), bodyColor, rounding, ImDrawFlags_RoundCornersBottom);
+        dl->AddLine(ImVec2(blockMin.x + rounding, curY + kBottomBarHeight), ImVec2(blockMax.x - rounding, curY + kBottomBarHeight), borderColor, 2.0f);
+    }
+
     dl->AddText(ImVec2(blockMin.x + 12, blockMin.y + kBlockHeaderHeight * 0.5f - 8),
                 IM_COL32(255, 255, 255, 255), block->label.c_str());
 
-    // Draw each field row: label + either the literal text box or, if
-    // something's plugged in, that block drawn inline (recursively).
     for (size_t i = 0; i < block->slots.size(); ++i) {
         DrawSlot(dl, canvasOrigin, block, static_cast<int>(i));
     }
 
+    // Recursively draw sub-stacks inline
+    for (size_t i = 0; i < block->subStacks.size(); ++i) {
+        if (block->subStacks[i]) {
+            DrawBlock(dl, canvasOrigin, block->subStacks[i], /*isDragGhost=*/false);
+        }
+    }
+
     ImVec2 headerMin = blockMin;
-    ImVec2 headerSize = ImVec2(block->size.x, block->slots.empty() ? block->size.y : kBlockHeaderHeight);
+    ImVec2 headerSize = ImVec2(block->size.x, block->slots.empty() && block->subStacks.empty() ? block->size.y : kBlockHeaderHeight);
     ImGui::SetCursorScreenPos(headerMin);
     ImGui::PushID((int)block->id);
     ImGui::InvisibleButton("block_drag", headerSize);
@@ -785,6 +1059,7 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 canvasOrigin, Block* block, b
         m_draggingBlock = block;
         m_dragJustStarted = true;
         m_dragWasPluggedIn = block->IsPluggedIn();
+        m_dragWasInSubStack = block->IsInSubStack();
         ImVec2 mouse = ImGui::GetIO().MousePos;
         m_dragGrabOffset = ImVec2(mouse.x - blockMin.x, mouse.y - blockMin.y);
     }
@@ -797,18 +1072,14 @@ void BlockEditor::DrawSlot(ImDrawList* dl, ImVec2 canvasOrigin, Block* owner, in
     ImVec2 rowOffset = SlotRowOffset(owner, slotIndex);
     ImVec2 rowMin = ImVec2(canvasOrigin.x + ownerPos.x + rowOffset.x, canvasOrigin.y + ownerPos.y + rowOffset.y);
 
-    // Field name label, to the left of the field area.
     ImVec2 labelPos = ImVec2(canvasOrigin.x + ownerPos.x + 12, rowMin.y + kSlotRowHeight * 0.5f - 8);
     dl->AddText(labelPos, IM_COL32(230, 230, 230, 255), slot.name.c_str());
 
     if (slot.plugged) {
-        // Something is plugged in, draw it inline, recursively. Its own
-        // EffectivePos() resolves through this owner+slot automatically.
         DrawBlock(dl, canvasOrigin, slot.plugged, /*isDragGhost=*/false);
         return;
     }
 
-    // Nothing plugged in, draw an editable literal text field.
     ImVec2 fieldMax = ImVec2(rowMin.x + kSlotFieldWidth, rowMin.y + kSlotRowHeight - 4.0f);
     dl->AddRectFilled(rowMin, fieldMax, IM_COL32(255, 255, 255, 235), 4.0f);
     dl->AddRect(rowMin, fieldMax, IM_COL32(60, 60, 60, 255), 4.0f, 0, 1.0f);
@@ -820,7 +1091,7 @@ void BlockEditor::DrawSlot(ImDrawList* dl, ImVec2 canvasOrigin, Block* owner, in
 
     char buf[256];
     std::snprintf(buf, sizeof(buf), "%s", slot.text.c_str());
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(0, 0, 0, 0)); // we already painted the field bg above
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(20, 20, 20, 255));
     if (ImGui::InputText("##field", buf, sizeof(buf))) {
         slot.text = buf;
@@ -868,6 +1139,11 @@ std::vector<uint8_t> BlockEditor::ExportBlocks() const {
             WritePod<uint8_t>(out, hasPlugged);
             WritePod<uint64_t>(out, slot.plugged ? slot.plugged->id : 0);
         }
+
+        WritePod<uint32_t>(out, static_cast<uint32_t>(b->subStacks.size()));
+        for (Block* sub : b->subStacks) {
+            WritePod<uint64_t>(out, sub ? sub->id : 0);
+        }
     }
 
     return out;
@@ -878,6 +1154,8 @@ void BlockEditor::Cleanup() {
     m_headBlock = nullptr;
     m_draggingBlock = nullptr;
     m_snapTarget = nullptr;
+    m_snapSubStackOwner = nullptr;
+    m_snapSubStackIndex = -1;
     m_slotTargetOwner = nullptr;
     m_slotTargetIndex = -1;
     m_hoveredBlock = nullptr;
@@ -885,6 +1163,7 @@ void BlockEditor::Cleanup() {
     m_paletteDragIndex = -1;
     m_dragJustStarted = false;
     m_dragWasPluggedIn = false;
+    m_dragWasInSubStack = false;
 }
 
 bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
@@ -892,15 +1171,8 @@ bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
     uint64_t headId = 0;
     if (!ParseBlockBlob(data, parsed, headId)) return false;
 
-    // Everything validated by ParseBlockBlob — now, and only now, replace
-    // the live pile. Drag/snap/slot-target/hover state is cleared up front
-    // since it holds raw pointers into the pile we're about to destroy.
     Cleanup();
 
-    // Pass 1: construct every Block with its scalar fields and slot list
-    // (literal text only for now — plugged pointers are wired in pass 2,
-    // once every Block exists), id -> pointer lookup built alongside so
-    // later passes can resolve next/prev/plugged links.
     std::vector<std::pair<uint64_t, Block*>> idToBlock;
     idToBlock.reserve(parsed.size());
 
@@ -918,9 +1190,17 @@ bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
             Slot s;
             s.name = ps.name;
             s.text = ps.text;
-            // s.plugged wired in pass 2
             b->slots.push_back(std::move(s));
         }
+
+        // Match template sub-stack labels since they aren't serialized explicitly
+        for (const auto& tmpl : m_palette) {
+            if (tmpl.type == b->type) {
+                b->subStackLabels = tmpl.subStackLabels;
+                break;
+            }
+        }
+        b->subStacks.resize(pb.subStacks.size(), nullptr);
 
         idToBlock.emplace_back(pb.id, b);
     }
@@ -928,35 +1208,39 @@ bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
     auto resolve = [&](uint64_t id) -> Block* {
         if (id == 0) return nullptr;
         for (auto& kv : idToBlock) if (kv.first == id) return kv.second;
-        return nullptr; // unreachable given ParseBlockBlob's validation, but stay safe
+        return nullptr;
     };
 
-    // Pass 2: wire up next/prev now that every Block exists.
     for (size_t i = 0; i < parsed.size(); ++i) {
         Block* b = idToBlock[i].second;
         b->next = resolve(parsed[i].nextId);
         b->prev = resolve(parsed[i].prevId);
     }
 
-    // Pass 3: wire up slot plug pointers + the plugged block's back-links
-    // (slotParent/slotParentIndex). Done after pass 2 so every Block* is
-    // valid to reference regardless of declaration order in the blob.
     for (size_t i = 0; i < parsed.size(); ++i) {
         Block* b = idToBlock[i].second;
         for (size_t s = 0; s < parsed[i].slots.size(); ++s) {
             const auto& ps = parsed[i].slots[s];
             if (!ps.hasPlugged) continue;
             Block* child = resolve(ps.pluggedId);
-            if (!child) continue; // unreachable given validation, but stay safe
+            if (!child) continue;
             b->slots[s].plugged = child;
             child->slotParent = b;
             child->slotParentIndex = static_cast<int>(s);
+        }
+        for (size_t s = 0; s < parsed[i].subStacks.size(); ++s) {
+            uint64_t subId = parsed[i].subStacks[s];
+            if (subId == 0) continue;
+            Block* child = resolve(subId);
+            if (!child) continue;
+            b->subStacks[s] = child;
+            child->parentSubStack = b;
+            child->parentSubStackIndex = static_cast<int>(s);
         }
     }
 
     m_headBlock = resolve(headId);
 
-    // Keep future NextId() calls from ever colliding with an imported id.
     for (const auto& pb : parsed) {
         if (pb.id >= m_nextId) m_nextId = pb.id + 1;
     }
@@ -985,6 +1269,17 @@ BlockInfo BuildBlockInfo(const ParsedBlock& pb, const std::function<const Parsed
         info.fields.push_back(std::move(field));
     }
 
+    info.subStacks.resize(pb.subStacks.size());
+    for (size_t i = 0; i < pb.subStacks.size(); ++i) {
+        uint64_t curId = pb.subStacks[i];
+        while (curId != 0) {
+            const ParsedBlock* child = findById(curId);
+            if (!child) break;
+            info.subStacks[i].push_back(BuildBlockInfo(*child, findById));
+            curId = child->nextId;
+        }
+    }
+
     return info;
 }
 } // namespace
@@ -1002,7 +1297,7 @@ bool BlockEditor::WalkBlockBlob(const std::vector<uint8_t>& data,
     };
 
     const ParsedBlock* head = findById(headId);
-    if (!head) return false; // ParseBlockBlob already guarantees this, but stay safe
+    if (!head) return false;
 
     for (const ParsedBlock* cur = head; cur; cur = findById(cur->nextId)) {
         visit(BuildBlockInfo(*cur, findById));

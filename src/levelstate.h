@@ -31,11 +31,13 @@ struct LevelStateHeader {
     uint32_t magic;
     uint32_t version;
     int objectCounter;
+    bool codeMode = false;
 };
 
 class LevelState {
 public:
     int objectCounter = 0;
+    bool codeMode = false;
 
     void Save(const std::string& path) const;
     void Load(const std::string& path);

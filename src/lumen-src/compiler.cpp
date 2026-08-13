@@ -313,7 +313,7 @@ int compile(const std::string& script,
                         funcIndex = it->second.opcode;
                         funcArgs = 0;
                         requiredFuncArgs = it->second.argCount;
-                    } else {
+                    } else if(tokens[1] != "=") {
                         printError("Unknown function: " + token, lineIndex, errBuffer);
                         return -1;
                     }

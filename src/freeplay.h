@@ -135,12 +135,15 @@ protected:
     float toolbarTime = 0.0f;
     bool toolbarAnimation = false;
 
+    bool settingsPanel = false;
+
     void createBrush(const std::string& name, Engine* engine);
     void createObject(const std::string& name, const Vector3& pos, Engine* engine);
     void deleteObject(const std::string& id, Engine* engine);
 
-    // toggle between blocks and code
-    bool codeMode = false; // PROD: false
+    // toggle between blocks and code in settings
+    // real value in LevelState
+    int codeModeSwitch = 0;
 
     int haltedObjects = 0;
     int objectCount = 0;

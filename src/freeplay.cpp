@@ -141,13 +141,17 @@ void FreeplayScene::UICallback(Engine* engine) {
         extToggleF5 = false;
         if(running) {
             running = false;
+            // clear lingering dialogs after execution stopped
+            dialogs.clear();
+            inputDialogs.clear();
+            // reinstantiate original state
             instantiateLevel(engine);
         } else {
             closePropertiesPanel();
 
             bool status = true;
             for(auto& object: objects) {
-                if(!codeMode) {
+                if(!levelState.codeMode) {
                     // code gen from blocks
                     auto sc = GenerateCode(object->blockData);
                     object->sourceCode = sc;
@@ -155,6 +159,7 @@ void FreeplayScene::UICallback(Engine* engine) {
                 std::string message;
                 status = object->compileCode(message);
                 if(!status) {
+                    // TODO: for block mode pinpoint bad block
                     showDialog("Compilation error", message, nullptr);
                     break;
                 }
@@ -193,6 +198,14 @@ void FreeplayScene::UICallback(Engine* engine) {
         setToolbarActive(false);
     }
     ToolUI::SameLine();
+    if(ToolUI::Button("Settings", toolbarButtonSize)) {
+        if(running) {
+            showDialog("Error", "Not allowed during runtime", nullptr);
+        } else {
+            settingsPanel = !settingsPanel;
+        }
+    }
+    ToolUI::SameLine();
     ToolUI::Separator(VERTICAL);
     ToolUI::SameLine();
     if(ToolUI::Button("Save", toolbarButtonSize)) {
@@ -207,6 +220,7 @@ void FreeplayScene::UICallback(Engine* engine) {
         if(running) {
             showDialog("Error", "Not allowed during runtime", nullptr);
         } else {
+            closePropertiesPanel();
             levelState.Load("project.lumina");
             instantiateLevel(engine);
         }
@@ -215,7 +229,7 @@ void FreeplayScene::UICallback(Engine* engine) {
     
     // code editor
     if(toolbarActive && propertiesObject && propertiesObject->isInteractive) {
-        if(codeMode) {
+        if(levelState.codeMode) {
             InteractiveObject* object = static_cast<InteractiveObject*>(propertiesObject);
             ToolUI::SetNextWindowSize({extents.x / 3, extents.y - 70});
             ToolUI::SetNextWindowPos({0, 70});
@@ -335,7 +349,8 @@ void FreeplayScene::UICallback(Engine* engine) {
         std::vector<int> indicesToErase;
         for(int i = 0; i < dialogs.size(); i++) {
             auto& dialog = dialogs[i];
-            ToolUI::Begin(dialog.title.c_str());
+            std::string title = dialog.title + "###dialog_" + std::to_string(i);
+            ToolUI::Begin(title.c_str());
             ToolUI::Text(dialog.message.c_str());
             if(ToolUI::Button("OK")) {
                 if(dialog.onClose) {
@@ -355,7 +370,8 @@ void FreeplayScene::UICallback(Engine* engine) {
         std::vector<int> indicesToErase;
         for(int i = 0; i < inputDialogs.size(); i++) {
             auto& dialog = inputDialogs[i];
-            ToolUI::Begin(dialog.title.c_str());
+            std::string title = dialog.title + "###inputDialog_" + std::to_string(i);
+            ToolUI::Begin(title.c_str());
             ToolUI::Text(dialog.message.c_str());
             std::string id = "##diag_" + dialog.title;
             ToolUI::TextField(id.c_str(), dialog.input, false);
@@ -371,6 +387,18 @@ void FreeplayScene::UICallback(Engine* engine) {
             inputDialogs[idx] = std::move(inputDialogs.back());
             inputDialogs.pop_back();
         }
+    }
+
+    if(settingsPanel && toolbarActive && !running) {
+        ToolUI::Begin("Settings");
+        ToolUI::Text("Coding environment");
+        if(ToolUI::RadioButtonInt("Blocks", &codeModeSwitch, 0)) {
+            // TODO: show warning when going back from code that everything will be lost
+        }
+        if(ToolUI::RadioButtonInt("Code", &codeModeSwitch, 1)) {
+            // TODO: show confirmation for converting irreversibly blocks to code
+        }
+        ToolUI::End();
     }
 }
 
@@ -1028,7 +1056,7 @@ void FreeplayScene::closePropertiesPanel() {
 
     propertiesObject->updateTexture(propertiesObjectTexture);
 
-    if(propertiesPanelType == INTERACTIVE && !codeMode) {
+    if(propertiesPanelType == INTERACTIVE && !levelState.codeMode) {
         // save to scene object
         InteractiveObject* io = static_cast<InteractiveObject*>(propertiesObject);
         io->blockData = std::move(m_blockEditor.ExportBlocks());
@@ -1059,7 +1087,7 @@ void FreeplayScene::openPropertiesPanel(Tile* object) {
     if(InteractiveObject* io = dynamic_cast<InteractiveObject*>(object)) {
         type = INTERACTIVE;
 
-        if(!codeMode) {
+        if(!levelState.codeMode) {
             m_blockEditor.Init();
             m_blockEditor.ImportBlocks(io->blockData);
         }
@@ -1080,7 +1108,7 @@ void FreeplayScene::openPropertiesPanel(InteractiveObject* object) {
     propertiesObject = object;
 
     propertiesPanelType = INTERACTIVE;
-    if(!codeMode) {
+    if(!levelState.codeMode) {
         m_blockEditor.Init();
         InteractiveObject* io = static_cast<InteractiveObject*>(object);
         m_blockEditor.ImportBlocks(io->blockData);

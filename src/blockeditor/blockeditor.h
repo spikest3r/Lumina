@@ -12,7 +12,14 @@ enum class BlockType {
     HeadBlock,
     MoveForward,
     WaitUntilGround,
+    SetVariable,
+    SayText,
+    GoToPos,
     Variable,
+    If,
+    IfElse,
+    Forever,
+    Repeat,
 };
 
 inline bool IsSlotOnlyBlockType(BlockType type) {
@@ -48,9 +55,16 @@ struct Block {
     Block* slotParent = nullptr;
     int slotParentIndex = -1;
 
+    // Sub-stacks for control flow blocks (C-blocks)
+    std::vector<Block*> subStacks;
+    std::vector<std::string> subStackLabels;
+    Block* parentSubStack = nullptr;
+    int parentSubStackIndex = -1;
+
     bool IsHead() const { return type == BlockType::HeadBlock; }
     bool IsSlotOnly() const { return IsSlotOnlyBlockType(type); }
     bool IsPluggedIn() const { return slotParent != nullptr; }
+    bool IsInSubStack() const { return parentSubStack != nullptr; }
 };
 
 struct BlockTemplate {
@@ -58,6 +72,8 @@ struct BlockTemplate {
     std::string label;
     ImU32 color;
     std::vector<SlotTemplate> slots;
+    int subStackCount = 0;
+    std::vector<std::string> subStackLabels;
 };
 
 struct BlockInfo {
@@ -71,6 +87,7 @@ struct BlockInfo {
     BlockType type;
     std::string label;
     std::vector<Field> fields;
+    std::vector<std::vector<BlockInfo>> subStacks; // Automatically built chain for codegen
 };
 
 class BlockEditor {
@@ -92,6 +109,10 @@ private:
     Block* SpawnBlock(BlockType type, const std::string& label, ImVec2 pos);
     void LayoutBlock(Block* block);
 
+    void UpdateLayouts();
+    void UpdateBlockLayout(Block* block);
+    ImU32 GetBlockColor(BlockType type) const;
+
     void DrawSidebar();
     void DrawCanvas();
     void DrawBlock(ImDrawList* dl, ImVec2 canvasOrigin, Block* block, bool isDragGhost);
@@ -110,10 +131,13 @@ private:
 
     void PlugIntoSlot(Block* owner, int slotIndex, Block* block);
     void UnplugFromSlot(Block* block);
-    bool IsDescendantViaSlots(Block* root, Block* candidate) const;
+    void PlugIntoSubStack(Block* owner, int subStackIndex, Block* block);
+    void UnplugFromSubStack(Block* block);
+    bool IsDescendantViaChildren(Block* root, Block* candidate) const;
 
     ImVec2 EffectivePos(const Block* block) const;
     ImVec2 SlotRowOffset(const Block* owner, int slotIndex) const;
+    ImVec2 SubStackOffset(const Block* owner, int subStackIndex) const;
     ImVec2 GetChainSlotScreenPos(ImVec2 canvasOrigin, Block* anchor) const;
     Block* ChainRoot(Block* block) const;
     bool IsHeadOrDescendantOfHead(Block* block) const;
@@ -138,8 +162,11 @@ private:
     ImVec2 m_dragGrabOffset{0, 0};
     bool m_dragJustStarted = false;
     bool m_dragWasPluggedIn = false;
+    bool m_dragWasInSubStack = false;
 
     Block* m_snapTarget = nullptr;
+    Block* m_snapSubStackOwner = nullptr;
+    int    m_snapSubStackIndex = -1;
     Block* m_slotTargetOwner = nullptr;
     int    m_slotTargetIndex = -1;
     Block* m_hoveredBlock = nullptr;
@@ -151,8 +178,10 @@ private:
     static constexpr float kSlotRowHeight = 28.0f;
     static constexpr float kSlotFieldWidth = 90.0f;
     static constexpr float kBlockHeaderHeight = 30.0f;
+    static constexpr float kSubStackMinHeight = 40.0f;
+    static constexpr float kSubStackIndent = 20.0f;
+    static constexpr float kBottomBarHeight = 20.0f;
 };
 
 // codegen part
-
 std::string GenerateCode(const std::vector<uint8_t>& blocks);
