@@ -10,6 +10,7 @@
 #include "helpers.h"
 #include "objects.h"
 #include "objectresources.h"
+#include "imgui.h"
 
 #include <typeinfo>
 
@@ -19,6 +20,17 @@ constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
 constexpr float RAD2DEG = 180.0f / 3.14159265358979323846f;
 
 #define MAX_WORLD_HEIGHT 4
+
+#include "imgui.h"
+
+void GameUpdate() {
+    ImGui::Begin("Game-side ImGui Test");
+    ImGui::Text("Hello from the game executable");
+    static int counter = 0;
+    if (ImGui::Button("Click me")) counter++;
+    ImGui::Text("Clicked %d times", counter);
+    ImGui::End();
+}
 
 static GridPos WorldToGrid(const Vector3& pos)
 {
@@ -115,6 +127,8 @@ void FreeplayScene::InitScene(Engine* engine) {
     constructGameObjects(engine);
 
     ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
+
+    m_blockEditor.InitPalette();
 }
 
 void FreeplayScene::UICallback(Engine* engine) {
@@ -129,8 +143,15 @@ void FreeplayScene::UICallback(Engine* engine) {
             running = false;
             instantiateLevel(engine);
         } else {
+            closePropertiesPanel();
+
             bool status = true;
             for(auto& object: objects) {
+                if(!codeMode) {
+                    // code gen from blocks
+                    auto sc = GenerateCode(object->blockData);
+                    object->sourceCode = sc;
+                }
                 std::string message;
                 status = object->compileCode(message);
                 if(!status) {
@@ -147,14 +168,6 @@ void FreeplayScene::UICallback(Engine* engine) {
                 objectCount = objects.size();
                 haltedObjects = 0;
                 running = true;
-
-                propertiesPanelType = CLOSED;
-                if(textureSelection) {
-                    propertiesObject->updateTexture(propertiesObjectTexture);
-                    textureSelection = false;
-                }
-                propertiesObject = nullptr;
-                propertiesObjectTexture = nullptr;
             }
         }
     }
@@ -201,8 +214,8 @@ void FreeplayScene::UICallback(Engine* engine) {
     ToolUI::End();
     
     // code editor
-    if(codeMode && toolbarActive && propertiesObject) {
-        if(propertiesObject->isInteractive) {
+    if(toolbarActive && propertiesObject && propertiesObject->isInteractive) {
+        if(codeMode) {
             InteractiveObject* object = static_cast<InteractiveObject*>(propertiesObject);
             ToolUI::SetNextWindowSize({extents.x / 3, extents.y - 70});
             ToolUI::SetNextWindowPos({0, 70});
@@ -212,6 +225,8 @@ void FreeplayScene::UICallback(Engine* engine) {
                 currentObject->sourceCode = object->sourceCode;
             }
             ToolUI::End();
+        } else {
+            m_blockEditor.Render();
         }
     }
 
@@ -263,12 +278,7 @@ void FreeplayScene::UICallback(Engine* engine) {
             deleteObj = ToolUI::Button("Delete");
         }
         if(close) {
-            propertiesObject->updateTexture(propertiesObjectTexture);
-
-            propertiesPanelType = CLOSED;
-            propertiesObject = nullptr;
-            propertiesObjectTexture = nullptr;
-            textureSelection = false;
+            closePropertiesPanel(); 
         } else if(deleteObj) {
             deleteObject(propertiesObject->id, engine);
         } else {
@@ -542,9 +552,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
                         // if we delete opened object, deactivate panel
                         if(propertiesObject == object) {
-                            propertiesPanelType = CLOSED;
-                            propertiesObject = nullptr;
-                            textureSelection = false;
+                            closePropertiesPanel();
                         }
                         
                         engine->requestDestroyGameObject(object);
@@ -655,25 +663,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             if(hit.object) {
                 auto object = dynamic_cast<Tile*>(hit.object);
                 if(object) {
-                    if(propertiesObject != nullptr && propertiesObjectTexture != nullptr) 
-                    {
-                        propertiesObject->updateTexture(propertiesObjectTexture);
-                        textureSelection = false;
-                        propertiesObject = nullptr;
-                        propertiesObjectTexture = nullptr;
-                    }
-
-                    auto data = getObjectData(object->type);
-                    propertiesObjectTexture = data.texture;
-
-                    propertiesObject = object;
-
-                    PropertiesPanelType type = TILE;
-                    if(dynamic_cast<InteractiveObject*>(object) != nullptr) {
-                        type = INTERACTIVE;
-                    }
-
-                    propertiesPanelType = type;
+                    openPropertiesPanel(object);
                 }
             }
         } else if(!leftPress && isLeftHeld) {
@@ -681,12 +671,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         }
 
         if(escOnFrame && propertiesPanelType != CLOSED) {
-            propertiesObject->updateTexture(propertiesObjectTexture);
-
-            propertiesPanelType = CLOSED;
-            propertiesObject = nullptr;
-            propertiesObjectTexture = nullptr;
-            textureSelection = false;
+            closePropertiesPanel();
         }
     } else if(running) {
         static bool isLeftHeld;
@@ -792,6 +777,8 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             std::cout << "Execution finished\n";
         }
     }
+
+    m_blockEditor.Update();
 }
 
 void FreeplayScene::DestroyScene(Engine* engine) {
@@ -880,21 +867,14 @@ void FreeplayScene::createObject(const std::string& name, const Vector3& pos, En
     levelState.AddObject(objectID, levelObject);
     // instantiate object
     InteractiveObject* newObject = static_cast<InteractiveObject*>(instantiateObject(engine, levelObject));
-    // get object data for resources
-    ObjectData data = getObjectData(name);
     // active properties panel for new object
-    propertiesObject = newObject;
-    textureSelection = false;
-    propertiesObjectTexture = data.texture;
-    propertiesPanelType = INTERACTIVE;
+    openPropertiesPanel(newObject);
 }
 
 void FreeplayScene::deleteObject(const std::string& id, Engine* engine) {
     auto object = sceneEntities[id];
     if(propertiesObject == object) {
-        propertiesPanelType = CLOSED;
-        propertiesObject = nullptr;
-        textureSelection = false;
+        closePropertiesPanel();
     }
     engine->requestDestroyGameObject(object);
     sceneEntities.erase(id);
@@ -952,6 +932,7 @@ Tile* FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object
         instance->gravity = object.gravity;
         instance->isInteractive = true;
         instance->sourceCode = object.sourceCode;
+        instance->blockData = object.blockData;
         instance->execType = object.execType;
         instance->scene = this;
         // push to level
@@ -1040,4 +1021,68 @@ void FreeplayScene::runtimeDestroyInteractive(InteractiveObject* object) {
 void FreeplayScene::stopExecution() {
     if(!running) return;
     extToggleF5 = true;
+}
+
+void FreeplayScene::closePropertiesPanel() {
+    if(propertiesPanelType == CLOSED || !propertiesObject) return;
+
+    propertiesObject->updateTexture(propertiesObjectTexture);
+
+    if(propertiesPanelType == INTERACTIVE && !codeMode) {
+        // save to scene object
+        InteractiveObject* io = static_cast<InteractiveObject*>(propertiesObject);
+        io->blockData = std::move(m_blockEditor.ExportBlocks());
+        
+        // save to template
+        LevelObject* obj = levelState.GetObject(io->id);
+        obj->blockData = io->blockData;
+    }
+
+    propertiesPanelType = CLOSED;
+    propertiesObject = nullptr;
+    propertiesObjectTexture = nullptr;
+    textureSelection = false;
+}
+
+void FreeplayScene::openPropertiesPanel(Tile* object) {
+    if(propertiesObject != nullptr && propertiesObjectTexture != nullptr) 
+    {
+        closePropertiesPanel();
+    }
+
+    auto data = getObjectData(object->type);
+    propertiesObjectTexture = data.texture;
+
+    propertiesObject = object;
+
+    PropertiesPanelType type = TILE;
+    if(InteractiveObject* io = dynamic_cast<InteractiveObject*>(object)) {
+        type = INTERACTIVE;
+
+        if(!codeMode) {
+            m_blockEditor.Init();
+            m_blockEditor.ImportBlocks(io->blockData);
+        }
+    }
+
+    propertiesPanelType = type;
+}
+
+void FreeplayScene::openPropertiesPanel(InteractiveObject* object) {
+    if(propertiesObject != nullptr && propertiesObjectTexture != nullptr) 
+    {
+        closePropertiesPanel();
+    }
+
+    auto data = getObjectData(object->type);
+    propertiesObjectTexture = data.texture;
+
+    propertiesObject = object;
+
+    propertiesPanelType = INTERACTIVE;
+    if(!codeMode) {
+        m_blockEditor.Init();
+        InteractiveObject* io = static_cast<InteractiveObject*>(object);
+        m_blockEditor.ImportBlocks(io->blockData);
+    }
 }

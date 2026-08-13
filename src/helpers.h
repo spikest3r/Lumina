@@ -53,3 +53,5 @@ Vector3 QuatToEuler(const Quaternion& q);
 Quaternion EulerToQuat(const Vector3& e);
 
 std::optional<KeyCode> KeyCodeFromString(const std::string& name);
+
+std::optional<float> ToFloat(const std::string& str);

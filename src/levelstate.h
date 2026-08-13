@@ -22,6 +22,7 @@ struct LevelObject {
     bool gravity = false;
     // TODO: Make this switchable between blocks and code
     std::string sourceCode;
+    std::vector<uint8_t> blockData;
 
     ExecutionType execType = ExecutionType::ONCE;
 };

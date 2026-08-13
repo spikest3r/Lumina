@@ -229,3 +229,17 @@ std::optional<KeyCode> KeyCodeFromString(const std::string& name) {
     if (it == map.end()) return std::nullopt;
     return it->second;
 }
+
+std::optional<float> ToFloat(const std::string& str) {
+    try {
+        size_t pos;
+        float value = std::stof(str, &pos);
+
+        if (pos != str.size())
+            return std::nullopt;
+
+        return value;
+    } catch (...) {
+        return std::nullopt;
+    }
+}

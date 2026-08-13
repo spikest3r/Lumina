@@ -36,6 +36,7 @@ public:
     WaitState waitState;
 
     std::string sourceCode;
+    std::vector<uint8_t> blockData;
 
     InteractiveObject();
     void resetVM(); // clears VM state

@@ -50,6 +50,13 @@ void LevelState::Save(const std::string& path) const {
         out.write(reinterpret_cast<const char*>(&obj.gravity), sizeof(bool));
         WriteString(out, obj.sourceCode);
         out.write(reinterpret_cast<const char*>(&obj.execType), sizeof(ExecutionType));
+
+        // Serialize blockData
+        uint32_t blockDataSize = static_cast<uint32_t>(obj.blockData.size());
+        out.write(reinterpret_cast<const char*>(&blockDataSize), sizeof(blockDataSize));
+        if (blockDataSize > 0) {
+            out.write(reinterpret_cast<const char*>(obj.blockData.data()), blockDataSize);
+        }
     }
 
     if (!out) throw std::runtime_error("LevelState::Save - write failed for: " + path);
@@ -100,6 +107,17 @@ void LevelState::Load(const std::string& path) {
 
         in.read(reinterpret_cast<char*>(&obj.execType), sizeof(ExecutionType));
         if (!in) throw std::runtime_error("LevelState::Load - truncated file (execType)");
+
+        // Deserialize blockData
+        uint32_t blockDataSize = 0;
+        in.read(reinterpret_cast<char*>(&blockDataSize), sizeof(blockDataSize));
+        if (!in) throw std::runtime_error("LevelState::Load - truncated file (blockData length)");
+
+        obj.blockData.resize(blockDataSize);
+        if (blockDataSize > 0) {
+            in.read(reinterpret_cast<char*>(obj.blockData.data()), blockDataSize);
+            if (!in) throw std::runtime_error("LevelState::Load - truncated file (blockData payload)");
+        }
 
         loaded.emplace(std::move(key), std::move(obj));
     }

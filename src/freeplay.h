@@ -8,6 +8,7 @@
 #include "objects.h"
 #include "resman.h"
 #include "levelstate.h"
+#include "blockeditor/blockeditor.h"
 
 enum PropertiesPanelType {
     CLOSED,
@@ -63,6 +64,7 @@ public:
 protected:
     ResourceManager* resourceManager;
     LevelState levelState;
+    BlockEditor m_blockEditor;
 
     void instantiateLevel(Engine* engine);
     Tile* instantiateObject(Engine* engine, const LevelObject& object);
@@ -88,6 +90,9 @@ protected:
     Tile* propertiesObject = nullptr;
     Texture* propertiesObjectTexture = nullptr;
     bool textureSelection = false;
+    void closePropertiesPanel();
+    void openPropertiesPanel(Tile* object);
+    void openPropertiesPanel(InteractiveObject* object);
     
     virtual void UICallback(Engine* engine);
 
@@ -135,7 +140,7 @@ protected:
     void deleteObject(const std::string& id, Engine* engine);
 
     // toggle between blocks and code
-    bool codeMode = true; // PROD: false
+    bool codeMode = false; // PROD: false
 
     int haltedObjects = 0;
     int objectCount = 0;
