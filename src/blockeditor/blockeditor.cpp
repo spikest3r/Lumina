@@ -3,11 +3,12 @@
 #include <cstring>
 #include <type_traits>
 #include <utility>
+#include <cmath>
 
 namespace {
 
 constexpr char kMagic[4] = { 'L', 'B', 'L', 'K' };
-constexpr uint32_t kVersion = 2; // Bumped version for sub-stacks
+constexpr uint32_t kVersion = 3; // Bumped version for slot typing
 
 void WriteBytes(std::vector<uint8_t>& out, const void* data, size_t len) {
     const uint8_t* p = static_cast<const uint8_t*>(data);
@@ -46,6 +47,7 @@ bool ReadString(const std::vector<uint8_t>& in, size_t& offset, std::string& out
 struct ParsedSlot {
     std::string name;
     std::string text;
+    uint32_t allowedType = 0;
     bool hasPlugged = false;
     uint64_t pluggedId = 0;
 };
@@ -63,17 +65,42 @@ struct ParsedBlock {
 };
 
 bool IsKnownBlockTypeValue(uint32_t v) {
-    return v == static_cast<uint32_t>(BlockType::HeadBlock) ||
-           v == static_cast<uint32_t>(BlockType::MoveForward) ||
-           v == static_cast<uint32_t>(BlockType::WaitUntilGround) ||
-           v == static_cast<uint32_t>(BlockType::SayText) ||
-           v == static_cast<uint32_t>(BlockType::SetVariable) ||
-           v == static_cast<uint32_t>(BlockType::Variable) ||
-           v == static_cast<uint32_t>(BlockType::GoToPos) ||
-           v == static_cast<uint32_t>(BlockType::If) ||
-           v == static_cast<uint32_t>(BlockType::IfElse) ||
-           v == static_cast<uint32_t>(BlockType::Forever) ||
-           v == static_cast<uint32_t>(BlockType::Repeat);
+    // Validates against the full range of the BlockType enum.
+    return v >= static_cast<uint32_t>(BlockType::HeadBlock) &&
+           v <= static_cast<uint32_t>(BlockType::LogicNot);
+}
+
+bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
+    if (slotType == SlotType::Any) return true;
+    
+    bool isNumberSource = (blockType == BlockType::Variable ||
+                           blockType == BlockType::Ask ||
+                           blockType == BlockType::MathAdd ||
+                           blockType == BlockType::MathSub ||
+                           blockType == BlockType::MathMul ||
+                           blockType == BlockType::MathDiv ||
+                           blockType == BlockType::RandomRange);
+                           
+    bool isTextSource = (blockType == BlockType::Variable ||
+                         blockType == BlockType::Ask);
+                         
+    bool isLogicSource = (blockType == BlockType::LogicLess ||
+                          blockType == BlockType::LogicGreater ||
+                          blockType == BlockType::LogicEqual ||
+                          blockType == BlockType::LogicNotEqual ||
+                          blockType == BlockType::LogicLessEqual ||
+                          blockType == BlockType::LogicGreaterEqual ||
+                          blockType == BlockType::LogicNot ||
+                          blockType == BlockType::IsKeyDown ||
+                          blockType == BlockType::IsTouching ||
+                          blockType == BlockType::IsObstacleAhead);
+
+    if (slotType == SlotType::Text) return isTextSource;
+    if (slotType == SlotType::Number) return isNumberSource;
+    if (slotType == SlotType::TextOrNumber) return isTextSource || isNumberSource;
+    if (slotType == SlotType::Logic) return isLogicSource;
+    
+    return false;
 }
 
 bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& outBlocks, uint64_t& outHeadId) {
@@ -85,7 +112,7 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
     }
 
     uint32_t version = 0;
-    if (!ReadPod(data, offset, version) || (version != 1 && version != kVersion)) {
+    if (!ReadPod(data, offset, version) || (version != 1 && version != 2 && version != kVersion)) {
         return false;
     }
 
@@ -122,6 +149,12 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
             ParsedSlot ps;
             if (!ReadString(data, offset, ps.name)) return false;
             if (!ReadString(data, offset, ps.text)) return false;
+            
+            if (version >= 3) {
+                if (!ReadPod(data, offset, ps.allowedType)) return false;
+            } else {
+                ps.allowedType = 0; // Default to Any
+            }
 
             uint8_t hasPlugged = 0;
             if (!ReadPod(data, offset, hasPlugged)) return false;
@@ -262,35 +295,72 @@ void BlockEditor::Init() {
 
 void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::MoveForward, "Move Forward", IM_COL32(90, 140, 210, 255),
-                           { SlotTemplate{ "value", "5" } } });
+                           { SlotTemplate{ "value", "5", SlotType::Number } } });
 
     m_palette.push_back({ BlockType::GoToPos, "Go to Position", IM_COL32(90, 140, 210, 255),
-                           { SlotTemplate{ "X", "0" }, SlotTemplate{ "Y", "0" } } });
+                           { SlotTemplate{ "X", "0", SlotType::Number }, SlotTemplate{ "Y", "0", SlotType::Number } } });
 
-    m_palette.push_back({ BlockType::WaitUntilGround, "Wait Until Ground", IM_COL32(90, 140, 210, 255),
-                           { } });
+    m_palette.push_back({ BlockType::SetRot, "Set Rotation", IM_COL32(90, 140, 210, 255),
+                           { SlotTemplate{ "X", "0", SlotType::Number }, SlotTemplate{ "Y", "0", SlotType::Number }, SlotTemplate{ "Z", "0", SlotType::Number } } });
+
+    m_palette.push_back({ BlockType::WaitUntilGround, "Wait Until Ground", IM_COL32(90, 140, 210, 255), { } });
+    
+    m_palette.push_back({ BlockType::Wait, "Wait", IM_COL32(220, 160, 40, 255),
+                           { SlotTemplate{"seconds", "1.0", SlotType::Number} } });
 
     m_palette.push_back({ BlockType::SayText, "Say Text", IM_COL32(210, 90, 140, 255),
-                           { SlotTemplate {"text", "Hello, world!"} } });
+                           { SlotTemplate {"text", "Hello, world!", SlotType::Any} } });
+
+    m_palette.push_back({ BlockType::Ask, "Ask", IM_COL32(210, 90, 140, 255),
+                           { SlotTemplate {"What?", "Question", SlotType::Text} } });
 
     m_palette.push_back({ BlockType::SetVariable, "Set Variable", IM_COL32(150, 100, 200, 255),
-                           { SlotTemplate{ "name", "myVar" }, SlotTemplate{ "value", "0" } } });
+                           { SlotTemplate{ "name", "myVar", SlotType::Text }, SlotTemplate{ "value", "0", SlotType::TextOrNumber } } });
 
     m_palette.push_back({ BlockType::Variable, "Variable", IM_COL32(150, 100, 200, 255),
-                           { SlotTemplate{ "name", "myVar" } } });
+                           { SlotTemplate{ "name", "myVar", SlotType::Text } } });
 
-    // New control flow blocks
+    m_palette.push_back({ BlockType::DestroySelf, "Destroy Self", IM_COL32(200, 90, 90, 255), { } });
+    m_palette.push_back({ BlockType::StopAll, "Stop All", IM_COL32(200, 90, 90, 255), { } });
+
+    // Control flow blocks
     m_palette.push_back({ BlockType::If, "If", IM_COL32(220, 160, 40, 255),
-                           { SlotTemplate{"condition", "true"} }, 1, {""} });
+                           { SlotTemplate{"condition", "1", SlotType::Logic} }, 1, {""} });
 
     m_palette.push_back({ BlockType::IfElse, "If Else", IM_COL32(220, 160, 40, 255),
-                           { SlotTemplate{"condition", "true"} }, 2, {"", "else"} });
+                           { SlotTemplate{"condition", "1", SlotType::Logic} }, 2, {"", "else"} });
 
     m_palette.push_back({ BlockType::Forever, "Forever", IM_COL32(220, 160, 40, 255),
                            { }, 1, {""} });
 
     m_palette.push_back({ BlockType::Repeat, "Repeat", IM_COL32(220, 160, 40, 255),
-                           { SlotTemplate{"times", "10"} }, 1, {""} });
+                           { SlotTemplate{"times", "10", SlotType::Number} }, 1, {""} });
+
+    // Sensor blocks
+    ImU32 sensorColor = IM_COL32(255, 180, 120, 255);
+    m_palette.push_back({ BlockType::IsKeyDown, "Is Key Down", sensorColor, 
+        { SlotTemplate{"Key", "W", SlotType::Text} } });
+    m_palette.push_back({ BlockType::IsObstacleAhead, "Is Obstacle Ahead", sensorColor, {  } });
+    m_palette.push_back({ BlockType::IsTouching, "Is Touching", sensorColor, 
+        { SlotTemplate{"Object", "name", SlotType::Text} } });
+
+    // Math Blocks
+    ImU32 mathColor = IM_COL32(80, 180, 120, 255);
+    m_palette.push_back({ BlockType::MathAdd, "A + B", mathColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::MathSub, "A - B", mathColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::MathMul, "A * B", mathColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::MathDiv, "A / B", mathColor, { SlotTemplate{"A", "1", SlotType::Number}, SlotTemplate{"B", "1", SlotType::Number} } });
+    m_palette.push_back({ BlockType::RandomRange, "Random Range", mathColor, { SlotTemplate{"min", "0", SlotType::Number}, SlotTemplate{"max", "10", SlotType::Number} } });
+
+    // Logic Blocks
+    ImU32 logicColor = IM_COL32(100, 180, 200, 255);
+    m_palette.push_back({ BlockType::LogicLess, "A < B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::LogicGreater, "A > B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::LogicEqual, "A == B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::LogicNotEqual, "A != B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::LogicLessEqual, "A <= B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::LogicGreaterEqual, "A >= B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
+    m_palette.push_back({ BlockType::LogicNot, "Not", logicColor, { SlotTemplate{"condition", "1", SlotType::Logic} } });
 }
 
 Block* BlockEditor::SpawnBlock(BlockType type, const std::string& label, ImVec2 pos) {
@@ -308,6 +378,7 @@ Block* BlockEditor::SpawnBlock(BlockType type, const std::string& label, ImVec2 
                 Slot s;
                 s.name = st.name;
                 s.text = st.defaultText;
+                s.allowedType = st.allowedType;
                 b->slots.push_back(std::move(s));
             }
             b->subStacks.resize(tmpl.subStackCount, nullptr);
@@ -339,7 +410,7 @@ void BlockEditor::UpdateLayouts() {
 void BlockEditor::UpdateBlockLayout(Block* block) {
     if (!block) return;
 
-    float width = block->IsSlotOnly() ? 140.0f : 200.0f;
+    float width = block->IsSlotOnly() ? 160.0f : 220.0f; // Adjusted for better UX / text fit
 
     if (block->slots.empty() && block->subStacks.empty()) {
         block->size = ImVec2(width, block->IsSlotOnly() ? 28.0f : 50.0f);
@@ -410,9 +481,13 @@ void BlockEditor::UpdateDragFromPalette() {
             return;
         }
 
-        if (mouse.x > kSidebarWidth) {
-            ImVec2 grabOffset = ImVec2(100.0f, 10.0f);
-            ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x, mouse.y - m_canvasScreenOrigin.y);
+        if (mouse.x > m_canvasScreenOrigin.x) {
+            ImVec2 grabOffset = ImVec2(50.0f, 15.0f); // Smoother UX for dropping from palette
+            
+            // Adjust to offset map logic coordinates
+            ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x - m_canvasOffset.x, 
+                                        mouse.y - m_canvasScreenOrigin.y - m_canvasOffset.y);
+                                        
             ImVec2 dropPos = ImVec2(mouseCanvas.x - grabOffset.x, mouseCanvas.y - grabOffset.y);
 
             Block* spawned = SpawnBlock(tmpl.type, tmpl.label, dropPos);
@@ -444,7 +519,9 @@ void BlockEditor::UpdateDragExistingBlock() {
         }
 
         ImVec2 mouse = ImGui::GetIO().MousePos;
-        ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x, mouse.y - m_canvasScreenOrigin.y);
+        // Apply canvas panning offset to map to logical coordinates correctly
+        ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x - m_canvasOffset.x, 
+                                    mouse.y - m_canvasScreenOrigin.y - m_canvasOffset.y);
         m_draggingBlock->pos = ImVec2(mouseCanvas.x - m_dragGrabOffset.x, mouseCanvas.y - m_dragGrabOffset.y);
     } else {
         if (!m_draggingBlock->IsHead()) {
@@ -541,8 +618,12 @@ void BlockEditor::UpdateSlotTargeting() {
     if (!draggingSlotOnlyFromPalette && !draggingExistingBlock) return;
     if (draggingExistingBlock && m_draggingBlock->IsHead()) return;
 
+    BlockType draggedType = draggingExistingBlock ? m_draggingBlock->type : m_palette[m_paletteDragIndex].type;
+
     ImVec2 mouse = ImGui::GetIO().MousePos;
-    ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x, mouse.y - m_canvasScreenOrigin.y);
+    // Map bounds against offset coordinates properly
+    ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x - m_canvasOffset.x, 
+                                mouse.y - m_canvasScreenOrigin.y - m_canvasOffset.y);
 
     Block* bestOwner = nullptr;
     int bestIndex = -1;
@@ -556,6 +637,7 @@ void BlockEditor::UpdateSlotTargeting() {
 
         for (size_t i = 0; i < owner->slots.size(); ++i) {
             if (owner->slots[i].plugged != nullptr) continue;
+            if (!IsSlotCompatible(draggedType, owner->slots[i].allowedType)) continue;
 
             ImVec2 ownerPos = EffectivePos(owner);
             ImVec2 rowOffset = SlotRowOffset(owner, static_cast<int>(i));
@@ -721,6 +803,7 @@ void BlockEditor::PlugIntoSlot(Block* owner, int slotIndex, Block* block) {
     if (!owner || !block) return;
     if (slotIndex < 0 || static_cast<size_t>(slotIndex) >= owner->slots.size()) return;
     if (owner->slots[slotIndex].plugged != nullptr) return;
+    if (!IsSlotCompatible(block->type, owner->slots[slotIndex].allowedType)) return;
     if (block->prev != nullptr || block->next != nullptr) return;
     if (block->IsHead()) return;
     if (block == owner) return;
@@ -929,23 +1012,65 @@ void BlockEditor::DrawCanvas() {
     m_canvasScreenOrigin = canvasOrigin;
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
+    // ------------------------------------------------------------------------
+    // INFINITE PANNING CONTROLS
+    // ------------------------------------------------------------------------
+    if (ImGui::IsWindowHovered()) {
+        // Drag using Right or Middle mouse button
+        if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0.0f) || 
+            ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
+            m_canvasOffset.x += ImGui::GetIO().MouseDelta.x;
+            m_canvasOffset.y += ImGui::GetIO().MouseDelta.y;
+        }
+        
+        // Scroll using Mouse Wheel (Shift+Wheel for horizontal)
+        if (!ImGui::GetIO().KeyCtrl && ImGui::GetIO().MouseWheel != 0.0f) {
+            if (ImGui::GetIO().KeyShift) {
+                m_canvasOffset.x += ImGui::GetIO().MouseWheel * 30.0f;
+            } else {
+                m_canvasOffset.y += ImGui::GetIO().MouseWheel * 30.0f;
+            }
+        }
+    }
+
+    // Optional: Draw a subtle grid to visualize movement
+    ImU32 gridColor = IM_COL32(200, 200, 200, 40);
+    float gridSize = 32.0f;
+    ImVec2 winSize = ImGui::GetWindowSize();
+    
+    float fmodx = fmodf(m_canvasOffset.x, gridSize);
+    if (fmodx < 0.0f) fmodx += gridSize;
+    for (float x = fmodx; x < winSize.x; x += gridSize) {
+        dl->AddLine(ImVec2(canvasOrigin.x + x, canvasOrigin.y), ImVec2(canvasOrigin.x + x, canvasOrigin.y + winSize.y), gridColor);
+    }
+    
+    float fmody = fmodf(m_canvasOffset.y, gridSize);
+    if (fmody < 0.0f) fmody += gridSize;
+    for (float y = fmody; y < winSize.y; y += gridSize) {
+        dl->AddLine(ImVec2(canvasOrigin.x, canvasOrigin.y + y), ImVec2(canvasOrigin.x + winSize.x, canvasOrigin.y + y), gridColor);
+    }
+    
+    // Setup Offset Render Vector
+    ImVec2 viewOrigin = ImVec2(canvasOrigin.x + m_canvasOffset.x, canvasOrigin.y + m_canvasOffset.y);
+    // ------------------------------------------------------------------------
+
     m_hoveredBlock = nullptr;
 
     for (auto& up : m_blocks) {
         Block* b = up.get();
         if (b->IsPluggedIn() || b->IsInSubStack()) continue; // Let the owner draw it
-        DrawBlock(dl, canvasOrigin, b, /*isDragGhost=*/false);
+        DrawBlock(dl, viewOrigin, b, /*isDragGhost=*/false);
     }
 
     if (m_draggingBlock) {
         if (m_snapTarget) {
-            ImVec2 slotPos = GetChainSlotScreenPos(canvasOrigin, m_snapTarget);
+            ImVec2 slotPos = GetChainSlotScreenPos(viewOrigin, m_snapTarget);
             ImVec2 slotMax = ImVec2(slotPos.x + m_snapTarget->size.x, slotPos.y + 6.0f);
             dl->AddRectFilled(slotPos, slotMax, IM_COL32(255, 220, 80, 200), 3.0f);
         } else if (m_snapSubStackOwner && m_snapSubStackIndex >= 0) {
             ImVec2 ownerPos = EffectivePos(m_snapSubStackOwner);
             ImVec2 offset = SubStackOffset(m_snapSubStackOwner, m_snapSubStackIndex);
-            ImVec2 slotPos = ImVec2(canvasOrigin.x + ownerPos.x + offset.x, canvasOrigin.y + ownerPos.y + offset.y);
+            ImVec2 slotPos = ImVec2(viewOrigin.x + ownerPos.x + offset.x, viewOrigin.y + ownerPos.y + offset.y);
             ImVec2 slotMax = ImVec2(slotPos.x + m_snapSubStackOwner->size.x - offset.x, slotPos.y + 6.0f);
             dl->AddRectFilled(slotPos, slotMax, IM_COL32(255, 220, 80, 200), 3.0f);
         }
@@ -954,7 +1079,7 @@ void BlockEditor::DrawCanvas() {
     if (m_slotTargetOwner && m_slotTargetIndex >= 0) {
         ImVec2 ownerPos = EffectivePos(m_slotTargetOwner);
         ImVec2 rowOffset = SlotRowOffset(m_slotTargetOwner, m_slotTargetIndex);
-        ImVec2 fieldMin = ImVec2(canvasOrigin.x + ownerPos.x + rowOffset.x, canvasOrigin.y + ownerPos.y + rowOffset.y);
+        ImVec2 fieldMin = ImVec2(viewOrigin.x + ownerPos.x + rowOffset.x, viewOrigin.y + ownerPos.y + rowOffset.y);
         ImVec2 fieldMax = ImVec2(fieldMin.x + kSlotFieldWidth, fieldMin.y + kSlotRowHeight);
         dl->AddRect(fieldMin, fieldMax, IM_COL32(255, 220, 80, 255), 4.0f, 0, 3.0f);
     }
@@ -973,9 +1098,9 @@ ImU32 BlockEditor::GetBlockColor(BlockType type) const {
     return IsSlotOnlyBlockType(type) ? IM_COL32(150, 100, 200, 255) : IM_COL32(90, 140, 210, 255);
 }
 
-void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 canvasOrigin, Block* block, bool isDragGhost) {
+void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, bool isDragGhost) {
     ImVec2 effPos = EffectivePos(block);
-    ImVec2 blockMin = ImVec2(canvasOrigin.x + effPos.x, canvasOrigin.y + effPos.y);
+    ImVec2 blockMin = ImVec2(viewOrigin.x + effPos.x, viewOrigin.y + effPos.y);
     ImVec2 blockMax = ImVec2(blockMin.x + block->size.x, blockMin.y + block->size.y);
 
     ImU32 bodyColor = GetBlockColor(block->type);
@@ -1035,13 +1160,13 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 canvasOrigin, Block* block, b
                 IM_COL32(255, 255, 255, 255), block->label.c_str());
 
     for (size_t i = 0; i < block->slots.size(); ++i) {
-        DrawSlot(dl, canvasOrigin, block, static_cast<int>(i));
+        DrawSlot(dl, viewOrigin, block, static_cast<int>(i));
     }
 
     // Recursively draw sub-stacks inline
     for (size_t i = 0; i < block->subStacks.size(); ++i) {
         if (block->subStacks[i]) {
-            DrawBlock(dl, canvasOrigin, block->subStacks[i], /*isDragGhost=*/false);
+            DrawBlock(dl, viewOrigin, block->subStacks[i], /*isDragGhost=*/false);
         }
     }
 
@@ -1066,22 +1191,25 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 canvasOrigin, Block* block, b
     ImGui::PopID();
 }
 
-void BlockEditor::DrawSlot(ImDrawList* dl, ImVec2 canvasOrigin, Block* owner, int slotIndex) {
+void BlockEditor::DrawSlot(ImDrawList* dl, ImVec2 viewOrigin, Block* owner, int slotIndex) {
     Slot& slot = owner->slots[slotIndex];
     ImVec2 ownerPos = EffectivePos(owner);
     ImVec2 rowOffset = SlotRowOffset(owner, slotIndex);
-    ImVec2 rowMin = ImVec2(canvasOrigin.x + ownerPos.x + rowOffset.x, canvasOrigin.y + ownerPos.y + rowOffset.y);
+    ImVec2 rowMin = ImVec2(viewOrigin.x + ownerPos.x + rowOffset.x, viewOrigin.y + ownerPos.y + rowOffset.y);
 
-    ImVec2 labelPos = ImVec2(canvasOrigin.x + ownerPos.x + 12, rowMin.y + kSlotRowHeight * 0.5f - 8);
+    ImVec2 labelPos = ImVec2(viewOrigin.x + ownerPos.x + 12, rowMin.y + kSlotRowHeight * 0.5f - 8);
     dl->AddText(labelPos, IM_COL32(230, 230, 230, 255), slot.name.c_str());
 
     if (slot.plugged) {
-        DrawBlock(dl, canvasOrigin, slot.plugged, /*isDragGhost=*/false);
+        DrawBlock(dl, viewOrigin, slot.plugged, /*isDragGhost=*/false);
         return;
     }
 
     ImVec2 fieldMax = ImVec2(rowMin.x + kSlotFieldWidth, rowMin.y + kSlotRowHeight - 4.0f);
-    dl->AddRectFilled(rowMin, fieldMax, IM_COL32(255, 255, 255, 235), 4.0f);
+    
+    // Slight visual hint: make strictly text-only fields look a tiny bit darker/distinct
+    ImU32 fieldColor = (slot.allowedType == SlotType::Text) ? IM_COL32(235, 235, 235, 235) : IM_COL32(255, 255, 255, 235);
+    dl->AddRectFilled(rowMin, fieldMax, fieldColor, 4.0f);
     dl->AddRect(rowMin, fieldMax, IM_COL32(60, 60, 60, 255), 4.0f, 0, 1.0f);
 
     ImGui::SetCursorScreenPos(rowMin);
@@ -1102,9 +1230,9 @@ void BlockEditor::DrawSlot(ImDrawList* dl, ImVec2 canvasOrigin, Block* owner, in
     ImGui::PopID();
 }
 
-ImVec2 BlockEditor::GetChainSlotScreenPos(ImVec2 canvasOrigin, Block* anchor) const {
+ImVec2 BlockEditor::GetChainSlotScreenPos(ImVec2 viewOrigin, Block* anchor) const {
     ImVec2 effPos = EffectivePos(anchor);
-    return ImVec2(canvasOrigin.x + effPos.x, canvasOrigin.y + effPos.y + anchor->size.y);
+    return ImVec2(viewOrigin.x + effPos.x, viewOrigin.y + effPos.y + anchor->size.y);
 }
 
 // ============================================================================
@@ -1135,6 +1263,7 @@ std::vector<uint8_t> BlockEditor::ExportBlocks() const {
         for (const auto& slot : b->slots) {
             WriteString(out, slot.name);
             WriteString(out, slot.text);
+            WritePod<uint32_t>(out, static_cast<uint32_t>(slot.allowedType));
             uint8_t hasPlugged = slot.plugged ? 1 : 0;
             WritePod<uint8_t>(out, hasPlugged);
             WritePod<uint64_t>(out, slot.plugged ? slot.plugged->id : 0);
@@ -1164,6 +1293,7 @@ void BlockEditor::Cleanup() {
     m_dragJustStarted = false;
     m_dragWasPluggedIn = false;
     m_dragWasInSubStack = false;
+    m_canvasOffset = ImVec2(0, 0);
 }
 
 bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
@@ -1190,6 +1320,7 @@ bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
             Slot s;
             s.name = ps.name;
             s.text = ps.text;
+            s.allowedType = static_cast<SlotType>(ps.allowedType);
             b->slots.push_back(std::move(s));
         }
 
@@ -1260,6 +1391,7 @@ BlockInfo BuildBlockInfo(const ParsedBlock& pb, const std::function<const Parsed
         BlockInfo::Field field;
         field.name = ps.name;
         field.text = ps.text;
+        field.allowedType = static_cast<SlotType>(ps.allowedType);
         if (ps.hasPlugged) {
             const ParsedBlock* child = findById(ps.pluggedId);
             if (child) {

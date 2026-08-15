@@ -425,28 +425,46 @@ std::unordered_map<int, NativeFn> funcMap = {
         vm.variables[ptr].data = (int)colliding;
     }},
     {0xB5, [](VMExecutionData& vm) {
-        // askInt 'message', ptr
-        vm.suspended = true;
-        auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
-        auto message = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
-        vm.self->scene->showInputDialog(vm.self->name, message, [&vm, varIndex](std::string input) {
-            int64_t result = 0;
-            try {
-                result = std::stoll(input);
-            } catch(...) {
-                std::cout << "Invalid value!" << std::endl;
-            }
-            vm.variables[varIndex].type = TAG_INT;
-            vm.variables[varIndex].data = result;
-            vm.suspended = false;
-        });
+        // TODO: reserved for future use
+        throw std::runtime_error("Opcode 0xB5 is not implemented.");
     }},
     {0xB6, [](VMExecutionData& vm) {
-        // askStr 'message', ptr
+        // dynamic type
+        // ask 'message', ptr
         vm.suspended = true;
         auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
         auto message = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
+        
         vm.self->scene->showInputDialog(vm.self->name, message, [&vm, varIndex](std::string input) {
+            size_t pos = 0;
+            
+            // 1. Try parsing as Integer
+            try {
+                int64_t intResult = std::stoll(input, &pos);
+                if (pos == input.length()) { // Ensure the whole string was consumed
+                    vm.variables[varIndex].type = TAG_INT;
+                    vm.variables[varIndex].data = intResult;
+                    vm.suspended = false;
+                    return;
+                }
+            } catch (...) {
+                // Ignore and fall through
+            }
+
+            // 2. Try parsing as Float/Double
+            try {
+                double floatResult = std::stod(input, &pos);
+                if (pos == input.length()) { // Ensure the whole string was consumed
+                    vm.variables[varIndex].type = TAG_FLOAT; 
+                    vm.variables[varIndex].data = floatResult;
+                    vm.suspended = false;
+                    return;
+                }
+            } catch (...) {
+                // Ignore and fall through
+            }
+
+            // 3. Fallback to String
             vm.variables[varIndex].type = TAG_STRING;
             vm.variables[varIndex].data = input;
             vm.suspended = false;

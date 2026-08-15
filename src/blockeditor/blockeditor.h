@@ -14,21 +14,66 @@ enum class BlockType {
     WaitUntilGround,
     SetVariable,
     SayText,
+    Ask,
+    RandomRange,
+    Wait,
+    DestroySelf,
+    StopAll,
+    IsTouching,
+    IsKeyDown,
+    IsObstacleAhead,
     GoToPos,
+    SetRot,
     Variable,
     If,
     IfElse,
     Forever,
     Repeat,
+    MathAdd,
+    MathSub,
+    MathMul,
+    MathDiv,
+    LogicLess,
+    LogicGreater,
+    LogicEqual,
+    LogicNotEqual,
+    LogicLessEqual,
+    LogicGreaterEqual,
+    LogicNot
 };
 
 inline bool IsSlotOnlyBlockType(BlockType type) {
-    return type == BlockType::Variable;
+    return type == BlockType::Variable ||
+           type == BlockType::MathAdd ||
+           type == BlockType::MathSub ||
+           type == BlockType::MathMul ||
+           type == BlockType::MathDiv ||
+           type == BlockType::LogicLess ||
+           type == BlockType::LogicGreater ||
+           type == BlockType::LogicEqual ||
+           type == BlockType::LogicNotEqual ||
+           type == BlockType::LogicLessEqual ||
+           type == BlockType::LogicGreaterEqual ||
+           type == BlockType::LogicNot ||
+           type == BlockType::IsKeyDown ||
+           type == BlockType::IsTouching ||
+           type == BlockType::IsObstacleAhead ||
+           type == BlockType::Ask ||
+           type == BlockType::RandomRange;
 }
+
+enum class SlotType {
+    Any,            // Accepts any slot-only block
+    Number,         // Accepts Math blocks, Variables, and Ask
+    Logic,          // Accepts Logic blocks
+    Text,           // Accepts Variables and Ask
+    TextOrNumber    // Accepts Variables, Ask, and Math blocks (No Logic)
+};
 
 struct SlotTemplate {
     std::string name;
     std::string defaultText;
+    SlotType allowedType = SlotType::Any;
 };
 
 struct Block;
@@ -36,6 +81,7 @@ struct Block;
 struct Slot {
     std::string name;
     std::string text;
+    SlotType allowedType = SlotType::Any;
     Block* plugged = nullptr;
 };
 
@@ -45,7 +91,7 @@ struct Block {
     std::string label = "Block";
 
     ImVec2 pos{0, 0};
-    ImVec2 size{200, 50};
+    ImVec2 size{220, 50};
 
     Block* next = nullptr;
     Block* prev = nullptr;
@@ -80,6 +126,7 @@ struct BlockInfo {
     struct Field {
         std::string name;
         std::string text;
+        SlotType allowedType = SlotType::Any;
         std::unique_ptr<BlockInfo> plugged;
     };
 
@@ -115,8 +162,8 @@ private:
 
     void DrawSidebar();
     void DrawCanvas();
-    void DrawBlock(ImDrawList* dl, ImVec2 canvasOrigin, Block* block, bool isDragGhost);
-    void DrawSlot(ImDrawList* dl, ImVec2 canvasOrigin, Block* owner, int slotIndex);
+    void DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, bool isDragGhost);
+    void DrawSlot(ImDrawList* dl, ImVec2 viewOrigin, Block* owner, int slotIndex);
 
     void UpdateDragFromPalette();
     void UpdateDragExistingBlock();
@@ -138,7 +185,7 @@ private:
     ImVec2 EffectivePos(const Block* block) const;
     ImVec2 SlotRowOffset(const Block* owner, int slotIndex) const;
     ImVec2 SubStackOffset(const Block* owner, int subStackIndex) const;
-    ImVec2 GetChainSlotScreenPos(ImVec2 canvasOrigin, Block* anchor) const;
+    ImVec2 GetChainSlotScreenPos(ImVec2 viewOrigin, Block* anchor) const;
     Block* ChainRoot(Block* block) const;
     bool IsHeadOrDescendantOfHead(Block* block) const;
     bool IsInChainStartingAt(Block* chainStart, Block* candidate) const;
@@ -176,7 +223,7 @@ private:
     static constexpr float kSidebarWidth = 160.0f;
     static constexpr float kSnapDistance = 24.0f;
     static constexpr float kSlotRowHeight = 28.0f;
-    static constexpr float kSlotFieldWidth = 90.0f;
+    static constexpr float kSlotFieldWidth = 100.0f; // Widened for better UX
     static constexpr float kBlockHeaderHeight = 30.0f;
     static constexpr float kSubStackMinHeight = 40.0f;
     static constexpr float kSubStackIndent = 20.0f;

@@ -42,14 +42,80 @@ bool looksLikeNumber(const std::string& s) {
     return i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]));
 }
 
-std::string getFieldValue(const BlockInfo& block, int fieldID, bool format = true) {
+struct CodeGenData {
+    std::stringstream ss;
+    int tempCounter = 0;
+    int depth = 0;
+};
+
+inline std::string getTempLabel(int& counter) {
+    return "temp_" + std::to_string(counter++);
+}
+
+std::string getFieldValue(const BlockInfo& block, int fieldID, CodeGenData& data, bool format = true) {
     const auto& field = block.fields[fieldID];
+    const std::string idStr = std::to_string(fieldID);
     if(field.plugged) {
+        auto getBinaryOp = [&](const std::string& op) {
+            auto a = getFieldValue(*field.plugged, 0, data);
+            auto b = getFieldValue(*field.plugged, 1, data);
+            return a + " " + op + " " + b;
+        };
         switch(field.plugged->type) {
             case BlockType::Variable:
-                auto varName = field.plugged->fields[0].text;
-                // TODO: check if starts with digit and error
-                return varName;
+                {
+                    auto varName = field.plugged->fields[0].text;
+                    // TODO: check if starts with digit and error
+                    return varName;
+                }
+            case BlockType::Ask:
+                {
+                    auto text = field.plugged->fields[0].text;
+                    data.ss << "ask \'" << text << "\', &tempAsk" + idStr << "\n";
+                    return "tempAsk" + idStr;
+                }
+            case BlockType::IsKeyDown:
+                {
+                    data.ss << "isKeyDown \'" << field.plugged->fields[0].text << "\', &flagKeyDown" + idStr << "\n";
+                    return "flagKeyDown" + idStr + " == 1";
+                }
+            case BlockType::IsObstacleAhead:
+                {
+                    data.ss << "isObstacleAhead " << "&flagObstacleAhead" + idStr << "\n";
+                    return "flagObstacleAhead" + idStr + " == 1";
+                }
+            case BlockType::IsTouching:
+                {
+                    data.ss << "isTouching \'" << field.plugged->fields[0].text << "\', &flagIsTouching" + idStr << "\n";
+                    return "flagIsTouching" + idStr + " == 1";
+                }
+            case BlockType::RandomRange:
+                {
+                    auto min = getFieldValue(*field.plugged, 0, data);
+                    auto max = getFieldValue(*field.plugged, 1, data);
+                    data.ss << "randomRange " << min << ", " << max << ", &tempRandom" + idStr << "\n";
+                    return "tempRandom" + idStr;
+                }
+            case BlockType::MathAdd:  return getBinaryOp("+");
+            case BlockType::MathSub:  return getBinaryOp("-");
+            case BlockType::MathMul:  return getBinaryOp("*");
+            case BlockType::MathDiv:  return getBinaryOp("/");
+            case BlockType::LogicLess: return getBinaryOp("<");
+            case BlockType::LogicGreater: return getBinaryOp(">");
+            case BlockType::LogicEqual: return getBinaryOp("==");
+            case BlockType::LogicNotEqual: return getBinaryOp("!=");
+            case BlockType::LogicLessEqual: return getBinaryOp("<=");
+            case BlockType::LogicGreaterEqual: return getBinaryOp(">=");
+            case BlockType::LogicNot:
+                {
+                    auto condition = getFieldValue(*field.plugged, 0, data);
+                    data.ss << "if " << condition << "\n";
+                    data.ss << "flagNot" + idStr << " = 0";
+                    data.ss << "else\n";
+                    data.ss << "flagNot" + idStr << " = 1\n";
+                    data.ss << "endif\n";
+                    return "flagNot" + idStr + " == 1";
+                }
         }
     } else {
         if(format) {
@@ -69,18 +135,10 @@ std::string getFieldValue(const BlockInfo& block, int fieldID, bool format = tru
     return "";
 }
 
-struct CodeGenData {
-    std::stringstream ss;
-    int tempCounter = 0;
-};
-
-inline std::string getTempLabel(int& counter) {
-    return "temp_" + std::to_string(counter++);
-}
-
 void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
     auto& ss = codeGenData.ss;
     auto& tempCounter = codeGenData.tempCounter;
+    auto& depth = codeGenData.depth;
 
     switch (b.type) {
         case BlockType::HeadBlock:
@@ -88,18 +146,24 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
             break;
         case BlockType::MoveForward:
             {
-                auto text = getFieldValue(b, 0);
+                auto text = getFieldValue(b, 0, codeGenData);
                 auto valueOpt = ToFloat(text);
-                if(valueOpt) {
-                    ss << "moveForward " << text << "\n";
-                }
+                ss << "moveForward " << text << "\n";
                 break;
             }
         case BlockType::GoToPos:
             {
-                auto x = getFieldValue(b, 0);
-                auto y = getFieldValue(b, 1);
+                auto x = getFieldValue(b, 0, codeGenData);
+                auto y = getFieldValue(b, 1, codeGenData);
                 ss << "goToPos " << x << ", " << y << "\n";
+                break;
+            }
+        case BlockType::SetRot:
+            {
+                auto x = getFieldValue(b, 0, codeGenData);
+                auto y = getFieldValue(b, 1, codeGenData);
+                auto z = getFieldValue(b, 2, codeGenData);
+                ss << "setRot " << x << ", " << y << ", " << z << "\n";
                 break;
             }
         case BlockType::WaitUntilGround:
@@ -109,14 +173,14 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
             }
         case BlockType::SetVariable:
             {
-                auto name = getFieldValue(b, 0, false); // TODO: check if starts with digit and error
-                auto value = getFieldValue(b, 1);
+                auto name = getFieldValue(b, 0, codeGenData, false); // TODO: check if starts with digit and error
+                auto value = getFieldValue(b, 1, codeGenData);
                 ss << name << " = " << value << "\n";
                 break;
             }
         case BlockType::SayText:
             {
-                auto text = getFieldValue(b, 0);
+                auto text = getFieldValue(b, 0, codeGenData);
                 ss << "println " << text << "\n";
                 break;
             }
@@ -128,6 +192,63 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                     GenerateBlockCode(childInfo, codeGenData);
                 }
                 ss << "jump " << myLabel << "\n"; // jump to defined label
+                break;
+            }
+        case BlockType::Repeat:
+            {
+                auto counterLabel = "cnt_" + std::to_string(depth++);
+                auto myLabel = getTempLabel(tempCounter); // get label for this block
+                auto times = getFieldValue(b, 0, codeGenData);
+                ss << counterLabel << " = 0\n";
+                ss << "label " << myLabel << "\n"; // define label
+                for(const BlockInfo& childInfo : b.subStacks[0]) {
+                    GenerateBlockCode(childInfo, codeGenData);
+                }
+                ss << counterLabel << " = " << counterLabel << " + 1\n";
+                ss << "if " << counterLabel << " < " << times << "\n";
+                ss << "jump " << myLabel << "\n";
+                ss << "endif\n";
+                depth--;
+                break;
+            }
+        case BlockType::If:
+            {
+                auto condition = getFieldValue(b, 0, codeGenData);
+                ss << "if " << condition << "\n";
+                for(const BlockInfo& childInfo : b.subStacks[0]) {
+                    GenerateBlockCode(childInfo, codeGenData);
+                }
+                ss << "endif\n";
+                break;
+            }
+        case BlockType::IfElse:
+            {
+                auto condition = getFieldValue(b, 0, codeGenData);
+                ss << "if " << condition << "\n";
+                for(const BlockInfo& childInfo : b.subStacks[0]) {
+                    GenerateBlockCode(childInfo, codeGenData);
+                }
+                ss << "else\n";
+                for(const BlockInfo& childInfo : b.subStacks[1]) {
+                    GenerateBlockCode(childInfo, codeGenData);
+                }
+                ss << "endif\n";
+                break;
+            }
+        case BlockType::Wait:
+            {
+                auto delay = getFieldValue(b, 0, codeGenData);
+                ss << "waitMs " << delay << "\n";
+                break;
+            }
+        case BlockType::DestroySelf:
+            {
+                ss << "destroySelf\n";
+                break;
+            }
+        case BlockType::StopAll:
+            {
+                ss << "stopAll\n";
                 break;
             }
         default:
