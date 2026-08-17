@@ -14,6 +14,10 @@
 
 #include <typeinfo>
 
+enum class LoadIntent {
+    NO_INTENT, LOAD, NEW
+};
+
 constexpr Vector2 toolbarButtonSize = {110,50};
 constexpr float grid = 2.0f;
 constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
@@ -143,11 +147,19 @@ void FreeplayScene::InitScene(Engine* engine) {
 }
 
 void FreeplayScene::UICallback(Engine* engine) {
+    static bool fileMenu = false;
+
     Vector2 extents = engine->getExtents();
 
     ToolUI::SetNextWindowPos({0, toolbarY});
     ToolUI::SetNextWindowSize({extents.x, 70});
     ToolUI::Begin("##toolbar", true, false);
+    if(ToolUI::Button("File", toolbarButtonSize)) {
+        fileMenu = !fileMenu;
+    }
+    ToolUI::SameLine();
+    ToolUI::Separator(VERTICAL);
+    ToolUI::SameLine();
     if(ToolUI::Button(running ? "Stop" : "Run", toolbarButtonSize) || extToggleF5) {
         extToggleF5 = false;
         if(running) {
@@ -223,32 +235,6 @@ void FreeplayScene::UICallback(Engine* engine) {
             showDialog("Error", "Not allowed during runtime", nullptr);
         } else {
             settingsPanel = !settingsPanel;
-        }
-    }
-    ToolUI::SameLine();
-    ToolUI::Separator(VERTICAL);
-    ToolUI::SameLine();
-    if(ToolUI::Button("Save", toolbarButtonSize)) {
-        if(running) {
-            showDialog("Error", "Not allowed during runtime", nullptr);
-        } else {
-            if(propertiesPanelType == INTERACTIVE && !levelState.codeMode) {
-                // save to scene object
-                ExportBlockToObject();
-            }
-
-            levelState.Save("project.lumina");
-        }
-    }
-    ToolUI::SameLine();
-    if(ToolUI::Button("Load", toolbarButtonSize)) {
-        if(running) {
-            showDialog("Error", "Not allowed during runtime", nullptr);
-        } else {
-            closePropertiesPanel();
-            levelState.Load("project.lumina");
-            codeModeSwitch = levelState.codeMode;
-            instantiateLevel(engine);
         }
     }
     ToolUI::End();
@@ -514,6 +500,64 @@ void FreeplayScene::UICallback(Engine* engine) {
                 convertAlert = false;
             }
             ToolUI::End();
+        }
+    }
+
+    static LoadIntent intent = LoadIntent::NO_INTENT;
+    if(fileMenu && toolbarActive && !running) {
+        ToolUI::SetNextWindowPos({0, 70});
+        ToolUI::SetNextWindowSize({toolbarButtonSize.x + 20, toolbarButtonSize.y * 3 + 50});
+        ToolUI::Begin("##filebar", true, false);
+        if(ToolUI::Button("New", toolbarButtonSize)) {
+            intent = LoadIntent::NEW;
+        }
+        ToolUI::Separator(HORIZONTAL);
+        if(ToolUI::Button("Save", toolbarButtonSize)) {
+            SaveProject();
+        }
+        if(ToolUI::Button("Load", toolbarButtonSize)) {
+            intent = LoadIntent::LOAD;
+        }
+        ToolUI::End();
+    }
+
+    if(intent != LoadIntent::NO_INTENT) {
+        if(levelState.IsModified()) {
+            ToolUI::Begin("Warning!");
+            ToolUI::Text("You have unsaved changes! Do you want to save them before proceeding?");
+            if(ToolUI::Button("Yes")) {
+                SaveProject(); // sets modified to false
+            }
+            ToolUI::SameLine();
+            if(ToolUI::Button("No")) {
+                levelState.ResetModified();
+            }
+            ToolUI::SameLine();
+            if(ToolUI::Button("Cancel")) {
+                intent = LoadIntent::NO_INTENT;
+            }
+            ToolUI::End();
+        } else {
+            switch(intent) {
+                case LoadIntent::LOAD:
+                    {
+                        closePropertiesPanel();
+                        levelState.Load("project.lumina");
+                        codeModeSwitch = levelState.codeMode;
+                        instantiateLevel(engine);
+                        intent = LoadIntent::NO_INTENT;
+                        break;
+                    }
+                case LoadIntent::NEW:
+                    {
+                        closePropertiesPanel();
+                        levelState.Clear();
+                        codeModeSwitch = levelState.codeMode;
+                        constructGameObjects(engine);
+                        intent = LoadIntent::NO_INTENT;
+                        break;
+                    }
+            }
         }
     }
 }
@@ -1237,4 +1281,13 @@ void FreeplayScene::ExportBlockToObject() {
     // save to template
     LevelObject* obj = levelState.GetObject(io->id);
     obj->blockData = io->blockData;
+}
+
+void FreeplayScene::SaveProject() {
+    if(propertiesPanelType == INTERACTIVE && !levelState.codeMode) {
+        // save to scene object
+        ExportBlockToObject();
+    }
+
+    levelState.Save("project.lumina");
 }

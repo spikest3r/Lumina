@@ -28,7 +28,7 @@ void LevelState::ReadString(std::ifstream& in, std::string& s) {
     }
 }
 
-void LevelState::Save(const std::string& path) const {
+void LevelState::Save(const std::string& path) {
     std::ofstream out(path, std::ios::binary);
     if (!out) throw std::runtime_error("LevelState::Save - failed to open file: " + path);
 
@@ -61,6 +61,8 @@ void LevelState::Save(const std::string& path) const {
     }
 
     if (!out) throw std::runtime_error("LevelState::Save - write failed for: " + path);
+
+    isModified = false;
 }
 
 void LevelState::Load(const std::string& path) {
@@ -126,24 +128,47 @@ void LevelState::Load(const std::string& path) {
 
     levelObjects = std::move(loaded);
     objectCounter = header.objectCounter;
+
+    isModified = false;
+}
+
+void LevelState::Clear() {
+    std::unordered_map<std::string, LevelObject>().swap(levelObjects); // frees up heap immediately
+    objectCounter = 0;
+    codeMode = false;
+    isModified = false;
 }
 
 void LevelState::AddObject(const std::string& id, LevelObject object) {
     levelObjects[id] = std::move(object);
+    isModified = true;
 }
 
 void LevelState::DeleteObject(const std::string& id) {
     levelObjects.erase(id);
+    isModified = true;
 }
 
 void LevelState::UpdateObject(const std::string& id, LevelObject newObject) {
     levelObjects[id] = std::move(newObject);
+    isModified = true;
 }
 
 LevelObject* LevelState::GetObject(const std::string& id) {
     auto it = levelObjects.find(id);
     if (it != levelObjects.end()) {
+        isModified = true; // GetObject is almost always used to modify object inside level, therefore we can safely assume data will be modified on function call
         return &it->second;
     }
     throw std::runtime_error("Unknown level object");
+}
+
+bool LevelState::IsModified() 
+{ 
+    return isModified; 
+}
+
+void LevelState::ResetModified() 
+{ 
+    isModified = false; 
 }

@@ -158,4 +158,7 @@ protected:
     Engine* engPtr;
 
     void ExportBlockToObject();
+
+    bool modified = false;
+    void SaveProject();
 };
