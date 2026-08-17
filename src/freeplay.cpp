@@ -124,11 +124,22 @@ void FreeplayScene::InitScene(Engine* engine) {
 
     baseMaterial = engine->createPhysicsMaterial(0.5f,0.5f,0.5f);
 
+    sfxHandler = engine->createGameObject<GameObject>(
+        baseTransform,
+        nullptr,
+        nullptr,
+        baseMaterial,
+        false
+    );
+
     constructGameObjects(engine);
 
     ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
 
-    m_blockEditor.InitPalette();
+    m_blockEditor.Setup([this](const std::string& name) {
+        Sound* snd = resourceManager->getSound(name, false, false);
+        sfxHandler->playSound(snd, 1.0f);
+    });
 }
 
 void FreeplayScene::UICallback(Engine* engine) {
@@ -147,14 +158,22 @@ void FreeplayScene::UICallback(Engine* engine) {
             // reinstantiate original state
             instantiateLevel(engine);
         } else {
-            closePropertiesPanel();
-
             bool status = true;
+            ExportBlockToObject();
             for(auto& object: objects) {
                 if(!levelState.codeMode) {
                     // code gen from blocks
-                    auto sc = GenerateCode(object->blockData);
-                    object->sourceCode = sc;
+                    uint64_t errorBlockId = 0;
+                    std::string errorMsg;
+                    auto sc = GenerateCode(object->blockData, &errorMsg, &errorBlockId);
+                    if(sc) {
+                        object->sourceCode = sc.value();
+                    } else {
+                        m_blockEditor.SetErrorBlock(errorBlockId);
+                        showDialog("Error in block", errorMsg, nullptr);
+                        status = false;
+                        break;
+                    }
                 }
                 std::string message;
                 status = object->compileCode(message);
@@ -170,6 +189,7 @@ void FreeplayScene::UICallback(Engine* engine) {
             }
 
             if(status) {
+                closePropertiesPanel();
                 objectCount = objects.size();
                 haltedObjects = 0;
                 running = true;
@@ -212,6 +232,11 @@ void FreeplayScene::UICallback(Engine* engine) {
         if(running) {
             showDialog("Error", "Not allowed during runtime", nullptr);
         } else {
+            if(propertiesPanelType == INTERACTIVE && !levelState.codeMode) {
+                // save to scene object
+                ExportBlockToObject();
+            }
+
             levelState.Save("project.lumina");
         }
     }
@@ -222,6 +247,7 @@ void FreeplayScene::UICallback(Engine* engine) {
         } else {
             closePropertiesPanel();
             levelState.Load("project.lumina");
+            codeModeSwitch = levelState.codeMode;
             instantiateLevel(engine);
         }
     }
@@ -389,16 +415,106 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
     }
 
+    static bool convertAlert = false;
     if(settingsPanel && toolbarActive && !running) {
         ToolUI::Begin("Settings");
         ToolUI::Text("Coding environment");
         if(ToolUI::RadioButtonInt("Blocks", &codeModeSwitch, 0)) {
-            // TODO: show warning when going back from code that everything will be lost
+            codeModeSwitch = 1;
+            convertAlert = true;
         }
         if(ToolUI::RadioButtonInt("Code", &codeModeSwitch, 1)) {
-            // TODO: show confirmation for converting irreversibly blocks to code
+            codeModeSwitch = 0;
+            convertAlert = true;
         }
         ToolUI::End();
+
+        if(convertAlert) {
+            ToolUI::Begin("Warning!");
+            switch(codeModeSwitch) {
+                case 0: {
+                    // blocks to code
+                    ToolUI::Text("Warning: Converting blocks to code is an irreversible action and cannot be undone. Are you sure you want to proceed?");
+                    break;
+                }
+                case 1: {
+                    // code to blocks
+                    ToolUI::Text("Warning: Switching to blocks will completely wipe all source code, and your code will not be transferred to the blocks. Do you want to continue?");
+                    break;
+                }
+                default: {
+                    // undefined behavior
+                    ToolUI::Text("Undefined state");
+                    break;
+                }
+            }
+            if(ToolUI::Button("Yes", toolbarButtonSize)) {
+                convertAlert = false;
+
+                // proceed with conversion
+                switch(codeModeSwitch) {
+                    case 0: {
+                        // blocks to code
+                        closePropertiesPanel(); // ensure clear state
+                        // non-destructive compilation first to ensure no errors
+                        std::unordered_map<std::string, std::string> compiledSource;
+                        bool success = true;
+                        for(auto& object: objects) {
+                            // code gen from blocks
+                            uint64_t errorBlockId = 0;
+                            std::string errorMsg;
+                            auto sc = GenerateCode(object->blockData, &errorMsg, &errorBlockId);
+                            if(sc) {
+                                compiledSource[object->id] = std::move(*sc);
+                            } else {
+                                success = false;
+                                openPropertiesPanel(object); // open block editor
+                                m_blockEditor.SetErrorBlock(errorBlockId);
+                                showDialog("Error in block", errorMsg + "\nConversion has been aborted!", nullptr);
+                                break;
+                            }
+                        }
+                        if(success) {
+                            for(auto& object: objects) {
+                                // now apply source code to all objects
+                                object->blockData.clear();
+                                object->sourceCode = compiledSource[object->id];
+                                // and update template
+                                auto obj = levelState.GetObject(object->id);
+                                obj->blockData.clear();
+                                obj->sourceCode = compiledSource[object->id];
+                            }
+                            // finally, set levelState flag
+                            levelState.codeMode = true;
+                            codeModeSwitch = 1;
+                        }
+                        break;
+                    }
+                    case 1: {
+                        // code to blocks
+                        closePropertiesPanel(); // ensure clear state
+                        // wipe all source code
+                        for(auto& object: objects) {
+                            object->sourceCode.clear();
+                            levelState.GetObject(object->id)->sourceCode.clear();
+                        }
+                        // finally, set levelState flag
+                        levelState.codeMode = false;
+                        codeModeSwitch = 0;
+                        break;
+                    }
+                    default: {
+                        // undefined behavior, do nothing
+                        break;
+                    }
+                }
+            }
+            if(ToolUI::Button("No", toolbarButtonSize)) {
+                // abort
+                convertAlert = false;
+            }
+            ToolUI::End();
+        }
     }
 }
 
@@ -1057,13 +1173,9 @@ void FreeplayScene::closePropertiesPanel() {
     propertiesObject->updateTexture(propertiesObjectTexture);
 
     if(propertiesPanelType == INTERACTIVE && !levelState.codeMode) {
-        // save to scene object
-        InteractiveObject* io = static_cast<InteractiveObject*>(propertiesObject);
-        io->blockData = std::move(m_blockEditor.ExportBlocks());
-        
-        // save to template
-        LevelObject* obj = levelState.GetObject(io->id);
-        obj->blockData = io->blockData;
+        m_blockEditor.ClearErrors();
+
+        ExportBlockToObject();
     }
 
     propertiesPanelType = CLOSED;
@@ -1113,4 +1225,16 @@ void FreeplayScene::openPropertiesPanel(InteractiveObject* object) {
         InteractiveObject* io = static_cast<InteractiveObject*>(object);
         m_blockEditor.ImportBlocks(io->blockData);
     }
+}
+
+void FreeplayScene::ExportBlockToObject() {
+    if(propertiesPanelType == CLOSED) return;
+
+    // save to scene object
+    InteractiveObject* io = static_cast<InteractiveObject*>(propertiesObject);
+    io->blockData = std::move(m_blockEditor.ExportBlocks());
+
+    // save to template
+    LevelObject* obj = levelState.GetObject(io->id);
+    obj->blockData = io->blockData;
 }

@@ -8,7 +8,7 @@
 namespace {
 
 constexpr char kMagic[4] = { 'L', 'B', 'L', 'K' };
-constexpr uint32_t kVersion = 3; // Bumped version for slot typing
+constexpr uint32_t kVersion = 3; 
 
 void WriteBytes(std::vector<uint8_t>& out, const void* data, size_t len) {
     const uint8_t* p = static_cast<const uint8_t*>(data);
@@ -65,9 +65,8 @@ struct ParsedBlock {
 };
 
 bool IsKnownBlockTypeValue(uint32_t v) {
-    // Validates against the full range of the BlockType enum.
     return v >= static_cast<uint32_t>(BlockType::HeadBlock) &&
-           v <= static_cast<uint32_t>(BlockType::LogicNot);
+           v <= static_cast<uint32_t>(BlockType::Concat);
 }
 
 bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
@@ -82,7 +81,8 @@ bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
                            blockType == BlockType::RandomRange);
                            
     bool isTextSource = (blockType == BlockType::Variable ||
-                         blockType == BlockType::Ask);
+                         blockType == BlockType::Ask ||
+                         blockType == BlockType::Concat);
                          
     bool isLogicSource = (blockType == BlockType::LogicLess ||
                           blockType == BlockType::LogicGreater ||
@@ -153,7 +153,7 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
             if (version >= 3) {
                 if (!ReadPod(data, offset, ps.allowedType)) return false;
             } else {
-                ps.allowedType = 0; // Default to Any
+                ps.allowedType = 0; 
             }
 
             uint8_t hasPlugged = 0;
@@ -226,7 +226,7 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
             if (subId != 0) {
                 int idx = indexOfId(subId);
                 if (idx < 0 || claimedByNext[idx] || claimedBySlot[idx]) return false;
-                claimedByNext[idx] = 1; // Treated as a valid starting chain
+                claimedByNext[idx] = 1; 
                 const ParsedBlock* child = findBlock(subId);
                 if (!child || IsSlotOnlyBlockType(static_cast<BlockType>(child->type))) return false;
             }
@@ -275,14 +275,14 @@ bool ParseBlockBlob(const std::vector<uint8_t>& data, std::vector<ParsedBlock>& 
     return true;
 }
 
-} // namespace
+} 
 
 // ============================================================================
 // Init
 // ============================================================================
 
 void BlockEditor::Init() {
-    Cleanup();
+    Cleanup(true);
     
     m_blocks.push_back(std::make_unique<Block>());
     m_headBlock = m_blocks.back().get();
@@ -291,6 +291,31 @@ void BlockEditor::Init() {
     m_headBlock->label = "On Execute";
     m_headBlock->pos = ImVec2(40, 40);
     LayoutBlock(m_headBlock);
+
+    m_undoStack.clear();
+    m_redoStack.clear();
+    CommitState();
+}
+
+void BlockEditor::Setup(std::function<void(std::string)> playSoundCallback) {
+    playSound = std::move(playSoundCallback);
+    InitPalette();
+}
+
+void BlockEditor::SetErrorBlock(uint64_t blockId) {
+    for (auto& up : m_blocks) {
+        if (up->id == blockId) {
+            up->hasError = true;
+        } else {
+            up->hasError = false;
+        }
+    }
+}
+
+void BlockEditor::ClearErrors() {
+    for (auto& up : m_blocks) {
+        up->hasError = false;
+    }
 }
 
 void BlockEditor::InitPalette() {
@@ -323,7 +348,6 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::DestroySelf, "Destroy Self", IM_COL32(200, 90, 90, 255), { } });
     m_palette.push_back({ BlockType::StopAll, "Stop All", IM_COL32(200, 90, 90, 255), { } });
 
-    // Control flow blocks
     m_palette.push_back({ BlockType::If, "If", IM_COL32(220, 160, 40, 255),
                            { SlotTemplate{"condition", "1", SlotType::Logic} }, 1, {""} });
 
@@ -336,7 +360,6 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::Repeat, "Repeat", IM_COL32(220, 160, 40, 255),
                            { SlotTemplate{"times", "10", SlotType::Number} }, 1, {""} });
 
-    // Sensor blocks
     ImU32 sensorColor = IM_COL32(255, 180, 120, 255);
     m_palette.push_back({ BlockType::IsKeyDown, "Is Key Down", sensorColor, 
         { SlotTemplate{"Key", "W", SlotType::Text} } });
@@ -344,7 +367,6 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::IsTouching, "Is Touching", sensorColor, 
         { SlotTemplate{"Object", "name", SlotType::Text} } });
 
-    // Math Blocks
     ImU32 mathColor = IM_COL32(80, 180, 120, 255);
     m_palette.push_back({ BlockType::MathAdd, "A + B", mathColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
     m_palette.push_back({ BlockType::MathSub, "A - B", mathColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
@@ -352,7 +374,6 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::MathDiv, "A / B", mathColor, { SlotTemplate{"A", "1", SlotType::Number}, SlotTemplate{"B", "1", SlotType::Number} } });
     m_palette.push_back({ BlockType::RandomRange, "Random Range", mathColor, { SlotTemplate{"min", "0", SlotType::Number}, SlotTemplate{"max", "10", SlotType::Number} } });
 
-    // Logic Blocks
     ImU32 logicColor = IM_COL32(100, 180, 200, 255);
     m_palette.push_back({ BlockType::LogicLess, "A < B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
     m_palette.push_back({ BlockType::LogicGreater, "A > B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
@@ -361,6 +382,9 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::LogicLessEqual, "A <= B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
     m_palette.push_back({ BlockType::LogicGreaterEqual, "A >= B", logicColor, { SlotTemplate{"A", "0", SlotType::Number}, SlotTemplate{"B", "0", SlotType::Number} } });
     m_palette.push_back({ BlockType::LogicNot, "Not", logicColor, { SlotTemplate{"condition", "1", SlotType::Logic} } });
+
+    ImU32 stringColor = IM_COL32(100,150,100,255);
+    m_palette.push_back({ BlockType::Concat, "Join Strings", stringColor, { SlotTemplate{"string", "Hello", SlotType::Text}, SlotTemplate{"string", "World", SlotType::Text} } });
 }
 
 Block* BlockEditor::SpawnBlock(BlockType type, const std::string& label, ImVec2 pos) {
@@ -410,7 +434,7 @@ void BlockEditor::UpdateLayouts() {
 void BlockEditor::UpdateBlockLayout(Block* block) {
     if (!block) return;
 
-    float width = block->IsSlotOnly() ? 160.0f : 220.0f; // Adjusted for better UX / text fit
+    float width = block->IsSlotOnly() ? 160.0f : 220.0f; 
 
     if (block->slots.empty() && block->subStacks.empty()) {
         block->size = ImVec2(width, block->IsSlotOnly() ? 28.0f : 50.0f);
@@ -454,53 +478,20 @@ void BlockEditor::UpdateBlockLayout(Block* block) {
 
 
 void BlockEditor::Update() {
-    UpdateDragFromPalette();
+    if (ImGui::GetIO().KeyCtrl) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Z)) {
+            if (ImGui::GetIO().KeyShift) Redo();
+            else Undo();
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Y)) {
+            Redo();
+        }
+    }
+
     UpdateSnapping();
     UpdateSlotTargeting();
     UpdateDragExistingBlock();
     UpdateDeletion();
     UpdateLayouts(); 
-}
-
-void BlockEditor::UpdateDragFromPalette() {
-    if (!m_draggingFromPalette) return;
-
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        const BlockTemplate& tmpl = m_palette[m_paletteDragIndex];
-        ImVec2 mouse = ImGui::GetIO().MousePos;
-
-        if (IsSlotOnlyBlockType(tmpl.type)) {
-            if (m_slotTargetOwner && m_slotTargetIndex >= 0) {
-                Block* spawned = SpawnBlock(tmpl.type, tmpl.label, ImVec2(0, 0));
-                PlugIntoSlot(m_slotTargetOwner, m_slotTargetIndex, spawned);
-            }
-            m_draggingFromPalette = false;
-            m_paletteDragIndex = -1;
-            m_slotTargetOwner = nullptr;
-            m_slotTargetIndex = -1;
-            return;
-        }
-
-        if (mouse.x > m_canvasScreenOrigin.x) {
-            ImVec2 grabOffset = ImVec2(50.0f, 15.0f); // Smoother UX for dropping from palette
-            
-            // Adjust to offset map logic coordinates
-            ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x - m_canvasOffset.x, 
-                                        mouse.y - m_canvasScreenOrigin.y - m_canvasOffset.y);
-                                        
-            ImVec2 dropPos = ImVec2(mouseCanvas.x - grabOffset.x, mouseCanvas.y - grabOffset.y);
-
-            Block* spawned = SpawnBlock(tmpl.type, tmpl.label, dropPos);
-
-            m_draggingBlock = spawned;
-            m_dragGrabOffset = grabOffset;
-            m_dragJustStarted = false;
-            m_dragWasPluggedIn = false;
-            m_dragWasInSubStack = false;
-        }
-        m_draggingFromPalette = false;
-        m_paletteDragIndex = -1;
-    }
 }
 
 void BlockEditor::UpdateDragExistingBlock() {
@@ -519,20 +510,33 @@ void BlockEditor::UpdateDragExistingBlock() {
         }
 
         ImVec2 mouse = ImGui::GetIO().MousePos;
-        // Apply canvas panning offset to map to logical coordinates correctly
         ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x - m_canvasOffset.x, 
                                     mouse.y - m_canvasScreenOrigin.y - m_canvasOffset.y);
         m_draggingBlock->pos = ImVec2(mouseCanvas.x - m_dragGrabOffset.x, mouseCanvas.y - m_dragGrabOffset.y);
     } else {
+        bool structureChanged = false;
         if (!m_draggingBlock->IsHead()) {
             if (m_slotTargetOwner && m_slotTargetIndex >= 0) {
                 PlugIntoSlot(m_slotTargetOwner, m_slotTargetIndex, m_draggingBlock);
+                if (playSound) playSound("snap");
+                structureChanged = true;
             } else if (m_snapSubStackOwner && m_snapSubStackIndex >= 0) {
                 PlugIntoSubStack(m_snapSubStackOwner, m_snapSubStackIndex, m_draggingBlock);
+                if (playSound) playSound("snap");
+                structureChanged = true;
             } else if (m_snapTarget) {
                 InsertAfter(m_snapTarget, m_draggingBlock);
+                if (playSound) playSound("snap");
+                structureChanged = true;
+            } else {
+                structureChanged = true;
             }
+        } else {
+            structureChanged = true;
         }
+
+        if (structureChanged) CommitState();
+
         m_snapTarget = nullptr;
         m_snapSubStackOwner = nullptr;
         m_snapSubStackIndex = -1;
@@ -569,7 +573,6 @@ void BlockEditor::UpdateSnapping() {
         if (IsInChainStartingAt(m_draggingBlock, candidate)) continue;
         if (IsDescendantViaChildren(m_draggingBlock, candidate)) continue;
 
-        // Check normal stack snap
         if (candidate->next == nullptr) {
             ImVec2 candidatePos = EffectivePos(candidate);
             ImVec2 slot = ImVec2(candidatePos.x, candidatePos.y + candidate->size.y);
@@ -583,7 +586,6 @@ void BlockEditor::UpdateSnapping() {
             }
         }
 
-        // Check empty sub-stacks
         for (size_t i = 0; i < candidate->subStacks.size(); ++i) {
             if (candidate->subStacks[i] == nullptr) {
                 ImVec2 candidatePos = EffectivePos(candidate);
@@ -610,18 +612,12 @@ void BlockEditor::UpdateSlotTargeting() {
     m_slotTargetOwner = nullptr;
     m_slotTargetIndex = -1;
 
-    bool draggingSlotOnlyFromPalette = m_draggingFromPalette &&
-        m_paletteDragIndex >= 0 &&
-        IsSlotOnlyBlockType(m_palette[m_paletteDragIndex].type);
     bool draggingExistingBlock = (m_draggingBlock != nullptr && m_draggingBlock->IsSlotOnly());
+    if (!draggingExistingBlock) return;
+    if (m_draggingBlock->IsHead()) return;
 
-    if (!draggingSlotOnlyFromPalette && !draggingExistingBlock) return;
-    if (draggingExistingBlock && m_draggingBlock->IsHead()) return;
-
-    BlockType draggedType = draggingExistingBlock ? m_draggingBlock->type : m_palette[m_paletteDragIndex].type;
-
+    BlockType draggedType = m_draggingBlock->type;
     ImVec2 mouse = ImGui::GetIO().MousePos;
-    // Map bounds against offset coordinates properly
     ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x - m_canvasOffset.x, 
                                 mouse.y - m_canvasScreenOrigin.y - m_canvasOffset.y);
 
@@ -630,10 +626,8 @@ void BlockEditor::UpdateSlotTargeting() {
 
     for (auto& up : m_blocks) {
         Block* owner = up.get();
-        if (draggingExistingBlock) {
-            if (owner == m_draggingBlock) continue;
-            if (IsDescendantViaChildren(m_draggingBlock, owner)) continue;
-        }
+        if (owner == m_draggingBlock) continue;
+        if (IsDescendantViaChildren(m_draggingBlock, owner)) continue;
 
         for (size_t i = 0; i < owner->slots.size(); ++i) {
             if (owner->slots[i].plugged != nullptr) continue;
@@ -674,6 +668,7 @@ void BlockEditor::UpdateDeletion() {
         m_dragWasPluggedIn = false;
         m_dragWasInSubStack = false;
         DeleteChain(toDelete);
+        CommitState();
         return;
     }
 
@@ -681,6 +676,7 @@ void BlockEditor::UpdateDeletion() {
         Block* toDelete = m_hoveredBlock;
         m_hoveredBlock = nullptr;
         DeleteBlock(toDelete);
+        CommitState();
     }
 }
 
@@ -725,7 +721,7 @@ void ClearDanglingRefs(Editor* ed, Block* cur, Block*& snapTarget, Block*& snapS
     if (draggingBlock == cur) draggingBlock = nullptr;
     if (slotTargetOwner == cur) { slotTargetOwner = nullptr; slotTargetIndex = -1; }
 }
-} // namespace
+} 
 
 void BlockEditor::DeleteBlock(Block* block) {
     if (!block || block->IsHead()) return;
@@ -834,7 +830,7 @@ void BlockEditor::PlugIntoSubStack(Block* owner, int subStackIndex, Block* block
     if (!owner || !block) return;
     if (subStackIndex < 0 || static_cast<size_t>(subStackIndex) >= owner->subStacks.size()) return;
     if (owner->subStacks[subStackIndex] != nullptr) return;
-    if (block->prev != nullptr) return; // Must be a chain root
+    if (block->prev != nullptr) return; 
     if (block->IsHead()) return;
     if (block == owner) return;
     if (IsDescendantViaChildren(block, owner)) return;
@@ -968,6 +964,35 @@ bool BlockEditor::IsInChainStartingAt(Block* chainStart, Block* candidate) const
     return false;
 }
 
+void BlockEditor::CommitState() {
+    if (m_isUndoing) return;
+    m_undoStack.push_back(ExportBlocks());
+    if (m_undoStack.size() > 50) { 
+        m_undoStack.erase(m_undoStack.begin());
+    }
+    m_redoStack.clear();
+}
+
+void BlockEditor::Undo() {
+    if (m_undoStack.size() > 1) {
+        m_redoStack.push_back(m_undoStack.back());
+        m_undoStack.pop_back();
+        m_isUndoing = true;
+        ImportBlocks(m_undoStack.back());
+        m_isUndoing = false;
+    }
+}
+
+void BlockEditor::Redo() {
+    if (!m_redoStack.empty()) {
+        m_undoStack.push_back(m_redoStack.back());
+        m_isUndoing = true;
+        ImportBlocks(m_redoStack.back());
+        m_isUndoing = false;
+        m_redoStack.pop_back();
+    }
+}
+
 void BlockEditor::Render() {
     ImGui::Begin("Block Editor");
 
@@ -980,6 +1005,13 @@ void BlockEditor::Render() {
 
 void BlockEditor::DrawSidebar() {
     ImGui::BeginChild("palette", ImVec2(kSidebarWidth, 0), true);
+    
+    float btnW = (kSidebarWidth - 24.0f) / 2.0f;
+    if (ImGui::Button("Undo", ImVec2(btnW, 24))) Undo();
+    ImGui::SameLine();
+    if (ImGui::Button("Redo", ImVec2(btnW, 24))) Redo();
+    
+    ImGui::Separator();
     ImGui::TextDisabled("BLOCKS");
     ImGui::Separator();
 
@@ -993,9 +1025,21 @@ void BlockEditor::DrawSidebar() {
         ImGui::Button(tmpl.label.c_str(), buttonSize);
         ImGui::PopStyleColor();
 
-        if (ImGui::IsItemActivated()) {
-            m_draggingFromPalette = true;
-            m_paletteDragIndex = i;
+        if (ImGui::IsItemActive() && !m_draggingBlock) {
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f)) {
+                ImVec2 mouse = ImGui::GetIO().MousePos;
+                ImVec2 mouseCanvas = ImVec2(mouse.x - m_canvasScreenOrigin.x - m_canvasOffset.x,
+                                            mouse.y - m_canvasScreenOrigin.y - m_canvasOffset.y);
+                ImVec2 grabOffset = ImVec2(15.0f, 15.0f);
+                ImVec2 dropPos = ImVec2(mouseCanvas.x - grabOffset.x, mouseCanvas.y - grabOffset.y);
+                
+                Block* spawned = SpawnBlock(tmpl.type, tmpl.label, dropPos);
+                m_draggingBlock = spawned;
+                m_dragGrabOffset = grabOffset;
+                m_dragJustStarted = false;
+                m_dragWasPluggedIn = false;
+                m_dragWasInSubStack = false;
+            }
         }
 
         ImGui::PopID();
@@ -1012,18 +1056,13 @@ void BlockEditor::DrawCanvas() {
     m_canvasScreenOrigin = canvasOrigin;
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    // ------------------------------------------------------------------------
-    // INFINITE PANNING CONTROLS
-    // ------------------------------------------------------------------------
     if (ImGui::IsWindowHovered()) {
-        // Drag using Right or Middle mouse button
         if (ImGui::IsMouseDragging(ImGuiMouseButton_Right, 0.0f) || 
             ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
             m_canvasOffset.x += ImGui::GetIO().MouseDelta.x;
             m_canvasOffset.y += ImGui::GetIO().MouseDelta.y;
         }
         
-        // Scroll using Mouse Wheel (Shift+Wheel for horizontal)
         if (!ImGui::GetIO().KeyCtrl && ImGui::GetIO().MouseWheel != 0.0f) {
             if (ImGui::GetIO().KeyShift) {
                 m_canvasOffset.x += ImGui::GetIO().MouseWheel * 30.0f;
@@ -1033,7 +1072,6 @@ void BlockEditor::DrawCanvas() {
         }
     }
 
-    // Optional: Draw a subtle grid to visualize movement
     ImU32 gridColor = IM_COL32(200, 200, 200, 40);
     float gridSize = 32.0f;
     ImVec2 winSize = ImGui::GetWindowSize();
@@ -1050,16 +1088,14 @@ void BlockEditor::DrawCanvas() {
         dl->AddLine(ImVec2(canvasOrigin.x, canvasOrigin.y + y), ImVec2(canvasOrigin.x + winSize.x, canvasOrigin.y + y), gridColor);
     }
     
-    // Setup Offset Render Vector
     ImVec2 viewOrigin = ImVec2(canvasOrigin.x + m_canvasOffset.x, canvasOrigin.y + m_canvasOffset.y);
-    // ------------------------------------------------------------------------
 
     m_hoveredBlock = nullptr;
 
     for (auto& up : m_blocks) {
         Block* b = up.get();
-        if (b->IsPluggedIn() || b->IsInSubStack()) continue; // Let the owner draw it
-        DrawBlock(dl, viewOrigin, b, /*isDragGhost=*/false);
+        if (b->IsPluggedIn() || b->IsInSubStack()) continue; 
+        DrawBlock(dl, viewOrigin, b, false);
     }
 
     if (m_draggingBlock) {
@@ -1103,21 +1139,33 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, boo
     ImVec2 blockMin = ImVec2(viewOrigin.x + effPos.x, viewOrigin.y + effPos.y);
     ImVec2 blockMax = ImVec2(blockMin.x + block->size.x, blockMin.y + block->size.y);
 
+    float rounding = block->IsSlotOnly() ? std::min(block->size.y * 0.5f, 14.0f) : 8.0f;
+
+    if (block->hasError) {
+        dl->AddRectFilled(ImVec2(blockMin.x - 4.0f, blockMin.y - 4.0f), ImVec2(blockMax.x + 4.0f, blockMax.y + 4.0f), IM_COL32(255, 60, 60, 255), rounding + 2.0f);
+    }
+
     ImU32 bodyColor = GetBlockColor(block->type);
     
     ImU8 r = bodyColor & 0xFF;
     ImU8 g = (bodyColor >> 8) & 0xFF;
     ImU8 b = (bodyColor >> 16) & 0xFF;
     ImU8 a = (bodyColor >> 24) & 0xFF;
-    ImU32 borderColor = IM_COL32(std::max(0, r - 50), std::max(0, g - 50), std::max(0, b - 50), a);
 
-    float rounding = block->IsSlotOnly() ? std::min(block->size.y * 0.5f, 14.0f) : 8.0f;
+    ImU32 borderColor;
+    float borderThickness;
+    if (block->hasError) {
+        borderColor = IM_COL32(255, 60, 60, 255);
+        borderThickness = 4.0f;
+    } else {
+        borderColor = IM_COL32(std::max(0, r - 50), std::max(0, g - 50), std::max(0, b - 50), a);
+        borderThickness = 2.0f;
+    }
 
     if (block->subStacks.empty()) {
         dl->AddRectFilled(blockMin, blockMax, bodyColor, rounding);
-        dl->AddRect(blockMin, blockMax, borderColor, rounding, 0, 2.0f);
+        dl->AddRect(blockMin, blockMax, borderColor, rounding, 0, borderThickness);
     } else {
-        // C-Shape drawing
         float topH = kBlockHeaderHeight + 6.0f;
         for (auto& s : block->slots) {
             float rH = kSlotRowHeight;
@@ -1125,9 +1173,8 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, boo
             topH += rH;
         }
 
-        // Top bar
         dl->AddRectFilled(blockMin, ImVec2(blockMax.x, blockMin.y + topH), bodyColor, rounding, ImDrawFlags_RoundCornersTop);
-        dl->AddLine(ImVec2(blockMin.x + rounding, blockMin.y), ImVec2(blockMax.x - rounding, blockMin.y), borderColor, 2.0f);
+        dl->AddLine(ImVec2(blockMin.x + rounding, blockMin.y), ImVec2(blockMax.x - rounding, blockMin.y), borderColor, borderThickness);
         
         float curY = blockMin.y + topH;
         for (size_t i = 0; i < block->subStacks.size(); ++i) {
@@ -1146,14 +1193,12 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, boo
                 while(c) { chainH += c->size.y; c = c->next; }
                 stackH = std::max(stackH, chainH);
             }
-            // Left spine
             dl->AddRectFilled(ImVec2(blockMin.x, curY), ImVec2(blockMin.x + kSubStackIndent, curY + stackH), bodyColor, 0);
             curY += stackH;
         }
         
-        // Bottom bar
         dl->AddRectFilled(ImVec2(blockMin.x, curY), ImVec2(blockMax.x, curY + kBottomBarHeight), bodyColor, rounding, ImDrawFlags_RoundCornersBottom);
-        dl->AddLine(ImVec2(blockMin.x + rounding, curY + kBottomBarHeight), ImVec2(blockMax.x - rounding, curY + kBottomBarHeight), borderColor, 2.0f);
+        dl->AddLine(ImVec2(blockMin.x + rounding, curY + kBottomBarHeight), ImVec2(blockMax.x - rounding, curY + kBottomBarHeight), borderColor, borderThickness);
     }
 
     dl->AddText(ImVec2(blockMin.x + 12, blockMin.y + kBlockHeaderHeight * 0.5f - 8),
@@ -1163,10 +1208,9 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, boo
         DrawSlot(dl, viewOrigin, block, static_cast<int>(i));
     }
 
-    // Recursively draw sub-stacks inline
     for (size_t i = 0; i < block->subStacks.size(); ++i) {
         if (block->subStacks[i]) {
-            DrawBlock(dl, viewOrigin, block->subStacks[i], /*isDragGhost=*/false);
+            DrawBlock(dl, viewOrigin, block->subStacks[i], false);
         }
     }
 
@@ -1180,7 +1224,7 @@ void BlockEditor::DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, boo
         m_hoveredBlock = block;
     }
 
-    if (ImGui::IsItemActivated() && !m_draggingBlock && !m_draggingFromPalette) {
+    if (ImGui::IsItemActivated() && !m_draggingBlock) {
         m_draggingBlock = block;
         m_dragJustStarted = true;
         m_dragWasPluggedIn = block->IsPluggedIn();
@@ -1201,13 +1245,12 @@ void BlockEditor::DrawSlot(ImDrawList* dl, ImVec2 viewOrigin, Block* owner, int 
     dl->AddText(labelPos, IM_COL32(230, 230, 230, 255), slot.name.c_str());
 
     if (slot.plugged) {
-        DrawBlock(dl, viewOrigin, slot.plugged, /*isDragGhost=*/false);
+        DrawBlock(dl, viewOrigin, slot.plugged, false);
         return;
     }
 
     ImVec2 fieldMax = ImVec2(rowMin.x + kSlotFieldWidth, rowMin.y + kSlotRowHeight - 4.0f);
     
-    // Slight visual hint: make strictly text-only fields look a tiny bit darker/distinct
     ImU32 fieldColor = (slot.allowedType == SlotType::Text) ? IM_COL32(235, 235, 235, 235) : IM_COL32(255, 255, 255, 235);
     dl->AddRectFilled(rowMin, fieldMax, fieldColor, 4.0f);
     dl->AddRect(rowMin, fieldMax, IM_COL32(60, 60, 60, 255), 4.0f, 0, 1.0f);
@@ -1224,8 +1267,12 @@ void BlockEditor::DrawSlot(ImDrawList* dl, ImVec2 viewOrigin, Block* owner, int 
     if (ImGui::InputText("##field", buf, sizeof(buf))) {
         slot.text = buf;
     }
+    
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        CommitState();
+    }
+    
     ImGui::PopStyleColor(2);
-
     ImGui::PopID();
     ImGui::PopID();
 }
@@ -1278,7 +1325,7 @@ std::vector<uint8_t> BlockEditor::ExportBlocks() const {
     return out;
 }
 
-void BlockEditor::Cleanup() {
+void BlockEditor::Cleanup(bool resetCamera) {
     m_blocks.clear();
     m_headBlock = nullptr;
     m_draggingBlock = nullptr;
@@ -1288,12 +1335,13 @@ void BlockEditor::Cleanup() {
     m_slotTargetOwner = nullptr;
     m_slotTargetIndex = -1;
     m_hoveredBlock = nullptr;
-    m_draggingFromPalette = false;
-    m_paletteDragIndex = -1;
     m_dragJustStarted = false;
     m_dragWasPluggedIn = false;
     m_dragWasInSubStack = false;
-    m_canvasOffset = ImVec2(0, 0);
+    
+    if (resetCamera) {
+        m_canvasOffset = ImVec2(0, 0);
+    }
 }
 
 bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
@@ -1301,7 +1349,7 @@ bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
     uint64_t headId = 0;
     if (!ParseBlockBlob(data, parsed, headId)) return false;
 
-    Cleanup();
+    Cleanup(false);
 
     std::vector<std::pair<uint64_t, Block*>> idToBlock;
     idToBlock.reserve(parsed.size());
@@ -1324,7 +1372,6 @@ bool BlockEditor::ImportBlocks(const std::vector<uint8_t>& data) {
             b->slots.push_back(std::move(s));
         }
 
-        // Match template sub-stack labels since they aren't serialized explicitly
         for (const auto& tmpl : m_palette) {
             if (tmpl.type == b->type) {
                 b->subStackLabels = tmpl.subStackLabels;
@@ -1414,7 +1461,7 @@ BlockInfo BuildBlockInfo(const ParsedBlock& pb, const std::function<const Parsed
 
     return info;
 }
-} // namespace
+} 
 
 bool BlockEditor::WalkBlockBlob(const std::vector<uint8_t>& data,
                                  const std::function<void(BlockInfo)>& visit) {

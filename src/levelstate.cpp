@@ -32,10 +32,11 @@ void LevelState::Save(const std::string& path) const {
     std::ofstream out(path, std::ios::binary);
     if (!out) throw std::runtime_error("LevelState::Save - failed to open file: " + path);
 
-    LevelStateHeader header{ LEVEL_FILE_MAGIC, LEVEL_FILE_VERSION, objectCounter };
+    LevelStateHeader header{ LEVEL_FILE_MAGIC, LEVEL_FILE_VERSION, objectCounter, codeMode };
     out.write(reinterpret_cast<const char*>(&header.magic), sizeof(header.magic));
     out.write(reinterpret_cast<const char*>(&header.version), sizeof(header.version));
     out.write(reinterpret_cast<const char*>(&header.objectCounter), sizeof(header.objectCounter));
+    out.write(reinterpret_cast<const char*>(&header.codeMode), sizeof(header.codeMode));
 
     uint32_t count = static_cast<uint32_t>(levelObjects.size());
     out.write(reinterpret_cast<const char*>(&count), sizeof(count));
@@ -70,6 +71,7 @@ void LevelState::Load(const std::string& path) {
     in.read(reinterpret_cast<char*>(&header.magic), sizeof(header.magic));
     in.read(reinterpret_cast<char*>(&header.version), sizeof(header.version));
     in.read(reinterpret_cast<char*>(&header.objectCounter), sizeof(header.objectCounter));
+    in.read(reinterpret_cast<char*>(&header.codeMode), sizeof(header.codeMode));
     if (!in) throw std::runtime_error("LevelState::Load - truncated header: " + path);
     if (header.magic != LEVEL_FILE_MAGIC)
         throw std::runtime_error("LevelState::Load - not a valid level file: " + path);

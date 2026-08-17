@@ -5,6 +5,7 @@
 #include <memory>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include "imgui.h"
 #include "helpers.h"
 
@@ -39,7 +40,8 @@ enum class BlockType {
     LogicNotEqual,
     LogicLessEqual,
     LogicGreaterEqual,
-    LogicNot
+    LogicNot,
+    Concat
 };
 
 inline bool IsSlotOnlyBlockType(BlockType type) {
@@ -59,15 +61,16 @@ inline bool IsSlotOnlyBlockType(BlockType type) {
            type == BlockType::IsTouching ||
            type == BlockType::IsObstacleAhead ||
            type == BlockType::Ask ||
-           type == BlockType::RandomRange;
+           type == BlockType::RandomRange ||
+           type == BlockType::Concat;
 }
 
 enum class SlotType {
-    Any,            // Accepts any slot-only block
-    Number,         // Accepts Math blocks, Variables, and Ask
-    Logic,          // Accepts Logic blocks
-    Text,           // Accepts Variables and Ask
-    TextOrNumber    // Accepts Variables, Ask, and Math blocks (No Logic)
+    Any,            
+    Number,         
+    Logic,          
+    Text,           
+    TextOrNumber    
 };
 
 struct SlotTemplate {
@@ -89,6 +92,7 @@ struct Block {
     uint64_t id = 0;
     BlockType type;
     std::string label = "Block";
+    bool hasError = false;
 
     ImVec2 pos{0, 0};
     ImVec2 size{220, 50};
@@ -101,7 +105,6 @@ struct Block {
     Block* slotParent = nullptr;
     int slotParentIndex = -1;
 
-    // Sub-stacks for control flow blocks (C-blocks)
     std::vector<Block*> subStacks;
     std::vector<std::string> subStackLabels;
     Block* parentSubStack = nullptr;
@@ -134,15 +137,18 @@ struct BlockInfo {
     BlockType type;
     std::string label;
     std::vector<Field> fields;
-    std::vector<std::vector<BlockInfo>> subStacks; // Automatically built chain for codegen
+    std::vector<std::vector<BlockInfo>> subStacks;
 };
 
 class BlockEditor {
 public:
-    void InitPalette();
+    void Setup(std::function<void(std::string)> playSoundCallback);
     void Init();
     void Update();
     void Render();
+
+    void SetErrorBlock(uint64_t blockId);
+    void ClearErrors();
 
     std::vector<uint8_t> ExportBlocks() const;
     bool ImportBlocks(const std::vector<uint8_t>& data);
@@ -150,9 +156,12 @@ public:
     static bool WalkBlockBlob(const std::vector<uint8_t>& data,
                                const std::function<void(BlockInfo)>& visit);
 
-    void Cleanup();
+    void Cleanup(bool resetCamera = true);
 
 private:
+    std::function<void(std::string)> playSound;
+    void InitPalette();
+
     Block* SpawnBlock(BlockType type, const std::string& label, ImVec2 pos);
     void LayoutBlock(Block* block);
 
@@ -165,11 +174,14 @@ private:
     void DrawBlock(ImDrawList* dl, ImVec2 viewOrigin, Block* block, bool isDragGhost);
     void DrawSlot(ImDrawList* dl, ImVec2 viewOrigin, Block* owner, int slotIndex);
 
-    void UpdateDragFromPalette();
     void UpdateDragExistingBlock();
     void UpdateSnapping();
     void UpdateSlotTargeting();
     void UpdateDeletion();
+    
+    void CommitState();
+    void Undo();
+    void Redo();
 
     void DetachFromChain(Block* block);
     void InsertAfter(Block* anchor, Block* block);
@@ -202,9 +214,6 @@ private:
     float m_canvasZoom = 1.0f;
     ImVec2 m_canvasScreenOrigin{0, 0};
 
-    bool m_draggingFromPalette = false;
-    int  m_paletteDragIndex = -1;
-
     Block* m_draggingBlock = nullptr;
     ImVec2 m_dragGrabOffset{0, 0};
     bool m_dragJustStarted = false;
@@ -219,16 +228,19 @@ private:
     Block* m_hoveredBlock = nullptr;
 
     uint64_t m_nextId = 1;
+    
+    std::vector<std::vector<uint8_t>> m_undoStack;
+    std::vector<std::vector<uint8_t>> m_redoStack;
+    bool m_isUndoing = false;
 
     static constexpr float kSidebarWidth = 160.0f;
     static constexpr float kSnapDistance = 24.0f;
     static constexpr float kSlotRowHeight = 28.0f;
-    static constexpr float kSlotFieldWidth = 100.0f; // Widened for better UX
+    static constexpr float kSlotFieldWidth = 100.0f; 
     static constexpr float kBlockHeaderHeight = 30.0f;
     static constexpr float kSubStackMinHeight = 40.0f;
     static constexpr float kSubStackIndent = 20.0f;
     static constexpr float kBottomBarHeight = 20.0f;
 };
 
-// codegen part
-std::string GenerateCode(const std::vector<uint8_t>& blocks);
+std::optional<std::string> GenerateCode(const std::vector<uint8_t>& blocks, std::string* outError = nullptr, uint64_t* outErrorBlockId = nullptr);

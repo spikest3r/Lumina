@@ -66,6 +66,8 @@ protected:
     LevelState levelState;
     BlockEditor m_blockEditor;
 
+    GameObject* sfxHandler;
+
     void instantiateLevel(Engine* engine);
     Tile* instantiateObject(Engine* engine, const LevelObject& object);
     
@@ -154,4 +156,6 @@ protected:
     int inputDialogCount = 0; // cached count
 
     Engine* engPtr;
+
+    void ExportBlockToObject();
 };
