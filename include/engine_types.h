@@ -15,6 +15,7 @@ class GameObject;
 
 struct ObjectHeader {
     void (*destroy)(void*);
+    void* allocationBase;
 };
 
 struct Vector3 {

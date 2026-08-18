@@ -14,11 +14,8 @@
 
 #include <typeinfo>
 
-enum class LoadIntent {
-    NO_INTENT, LOAD, NEW
-};
-
 constexpr Vector2 toolbarButtonSize = {110,50};
+constexpr Vector2 fileMenuButtonSize = {110,30};
 constexpr float grid = 2.0f;
 constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
 constexpr float RAD2DEG = 180.0f / 3.14159265358979323846f;
@@ -26,15 +23,6 @@ constexpr float RAD2DEG = 180.0f / 3.14159265358979323846f;
 #define MAX_WORLD_HEIGHT 4
 
 #include "imgui.h"
-
-void GameUpdate() {
-    ImGui::Begin("Game-side ImGui Test");
-    ImGui::Text("Hello from the game executable");
-    static int counter = 0;
-    if (ImGui::Button("Click me")) counter++;
-    ImGui::Text("Clicked %d times", counter);
-    ImGui::End();
-}
 
 static GridPos WorldToGrid(const Vector3& pos)
 {
@@ -136,7 +124,24 @@ void FreeplayScene::InitScene(Engine* engine) {
         false
     );
 
-    constructGameObjects(engine);
+    if(loadNew) {
+        constructGameObjects(engine);
+        chosenFile = false;
+    } else {
+        std::cout << "Instantiating with existing project file\n";
+        levelState.Load(projectFile);
+        codeModeSwitch = levelState.codeMode;
+        instantiateLevel(engine);
+        
+        if(projectFile == "temporary.lumina") {
+            DeleteFileAsync("temporary.lumina");
+            showDialog("Previous session", "Your previous session has been auto-saved.\nDon't forget to save your projects!", nullptr);
+            chosenFile = false;
+            levelState.SetModified();
+        } else {
+            chosenFile = true;
+        }
+    }
 
     ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
 
@@ -144,11 +149,15 @@ void FreeplayScene::InitScene(Engine* engine) {
         Sound* snd = resourceManager->getSound(name, false, false);
         sfxHandler->playSound(snd, 1.0f);
     });
+
+    if(!chosenFile) {
+        projectFile = "temporary.lumina";
+    }
+
+    autosaveTime = autosaveInterval;
 }
 
 void FreeplayScene::UICallback(Engine* engine) {
-    static bool fileMenu = false;
-
     Vector2 extents = engine->getExtents();
 
     ToolUI::SetNextWindowPos({0, toolbarY});
@@ -401,7 +410,6 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
     }
 
-    static bool convertAlert = false;
     if(settingsPanel && toolbarActive && !running) {
         ToolUI::Begin("Settings");
         ToolUI::Text("Coding environment");
@@ -503,49 +511,78 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
     }
 
-    static LoadIntent intent = LoadIntent::NO_INTENT;
     if(fileMenu && toolbarActive && !running) {
         ToolUI::SetNextWindowPos({0, 70});
-        ToolUI::SetNextWindowSize({toolbarButtonSize.x + 20, toolbarButtonSize.y * 3 + 50});
+        ToolUI::SetNextWindowSize({fileMenuButtonSize.x + 20, fileMenuButtonSize.y * 5 + 50});
         ToolUI::Begin("##filebar", true, false);
-        if(ToolUI::Button("New", toolbarButtonSize)) {
+        if(ToolUI::Button("New", fileMenuButtonSize)) {
             intent = LoadIntent::NEW;
         }
         ToolUI::Separator(HORIZONTAL);
-        if(ToolUI::Button("Save", toolbarButtonSize)) {
-            SaveProject();
+        if(ToolUI::Button("Save", fileMenuButtonSize)) {
+            if(chosenFile) SaveProject();
+            else {
+                m_fileManager.Init(FileManager::Mode::SAVE, "", {".lumina"});
+                intent = LoadIntent::SAVEAS;
+            }
         }
-        if(ToolUI::Button("Load", toolbarButtonSize)) {
+        if(ToolUI::Button("Save as", fileMenuButtonSize)) {
+            m_fileManager.Init(FileManager::Mode::SAVE, "", {".lumina"});
+            intent = LoadIntent::SAVEAS;
+        }
+        if(ToolUI::Button("Load", fileMenuButtonSize)) {
             intent = LoadIntent::LOAD;
+        }
+        ToolUI::Separator(HORIZONTAL);
+        if(ToolUI::Button("Exit", fileMenuButtonSize)) {
+            intent = LoadIntent::EXIT;
         }
         ToolUI::End();
     }
 
     if(intent != LoadIntent::NO_INTENT) {
-        if(levelState.IsModified()) {
+        if(levelState.IsModified() && intent != LoadIntent::SAVEAS) {
             ToolUI::Begin("Warning!");
             ToolUI::Text("You have unsaved changes! Do you want to save them before proceeding?");
+            bool handle = false;
             if(ToolUI::Button("Yes")) {
                 SaveProject(); // sets modified to false
+                handle = true;
             }
             ToolUI::SameLine();
             if(ToolUI::Button("No")) {
                 levelState.ResetModified();
+                handle = true;
             }
             ToolUI::SameLine();
             if(ToolUI::Button("Cancel")) {
                 intent = LoadIntent::NO_INTENT;
             }
             ToolUI::End();
+            if(handle) {
+                switch(intent) {
+                    case LoadIntent::LOAD:
+                    {
+                        m_fileManager.Init(FileManager::Mode::OPEN, "", {".lumina"});
+                        break;
+                    }
+                }
+            }
         } else {
             switch(intent) {
                 case LoadIntent::LOAD:
                     {
-                        closePropertiesPanel();
-                        levelState.Load("project.lumina");
-                        codeModeSwitch = levelState.codeMode;
-                        instantiateLevel(engine);
-                        intent = LoadIntent::NO_INTENT;
+                        if (m_fileManager.HasResult()) {
+                            closePropertiesPanel();
+                            projectFile = m_fileManager.GetResult();
+                            levelState.Load(projectFile);
+                            codeModeSwitch = levelState.codeMode;
+                            instantiateLevel(engine);
+                            chosenFile = true;
+                            intent = LoadIntent::NO_INTENT;
+                        } else if (!m_fileManager.IsOpen() && !m_fileManager.HasResult()) {
+                            intent = LoadIntent::NO_INTENT;
+                        }
                         break;
                     }
                 case LoadIntent::NEW:
@@ -555,11 +592,33 @@ void FreeplayScene::UICallback(Engine* engine) {
                         codeModeSwitch = levelState.codeMode;
                         constructGameObjects(engine);
                         intent = LoadIntent::NO_INTENT;
+                        chosenFile = false;
+                        break;
+                    }
+                case LoadIntent::SAVEAS:
+                    {
+                        if (m_fileManager.HasResult()) {
+                            projectFile = m_fileManager.GetResult();
+                            m_fileManager.ClearResult();
+                            intent = LoadIntent::NO_INTENT;
+                            SaveProject();
+                            chosenFile = true;
+                        } else if (!m_fileManager.IsOpen() && !m_fileManager.HasResult()) {
+                            intent = LoadIntent::NO_INTENT;
+                        }
+                        break;
+                    }
+                case LoadIntent::EXIT:
+                    {
+                        unloadFreeplay();
+                        dropFile = true;
                         break;
                     }
             }
         }
     }
+
+    m_fileManager.Render();
 }
 
 void FreeplayScene::UpdateScene(Engine* engine) {
@@ -906,7 +965,6 @@ void FreeplayScene::UpdateScene(Engine* engine) {
     }
 
     if (running) {
-        static double vmAccumulator = 0.0;
         constexpr double VM_INSTRUCTIONS_PER_SECOND = 5280.0;
 
         vmAccumulator += dt * VM_INSTRUCTIONS_PER_SECOND;
@@ -967,10 +1025,24 @@ void FreeplayScene::UpdateScene(Engine* engine) {
     }
 
     m_blockEditor.Update();
+    m_fileManager.Update();
+
+    // autosave every minute
+    // TODO: configurable
+    autosaveTime -= dt;
+    if(autosaveTime <= 0.0f) {
+        autosaveTime = autosaveInterval;
+        SaveProject();
+    }
 }
 
 void FreeplayScene::DestroyScene(Engine* engine) {
-
+    if(chosenFile) {
+        std::ofstream("last") << projectFile;
+    } else if(!dropFile) {
+        SaveProject();
+    }
+    engine->SetUICallback(nullptr);
 }
 
 void FreeplayScene::constructGameObjects(Engine* engine) {
@@ -1289,5 +1361,10 @@ void FreeplayScene::SaveProject() {
         ExportBlockToObject();
     }
 
-    levelState.Save("project.lumina");
+    levelState.Save(projectFile);
+}
+
+void FreeplayScene::setProjectFile(const std::string& file) {
+    loadNew = false;
+    projectFile = file;
 }

@@ -172,3 +172,8 @@ void LevelState::ResetModified()
 { 
     isModified = false; 
 }
+
+void LevelState::SetModified() 
+{
+    isModified = true;
+}

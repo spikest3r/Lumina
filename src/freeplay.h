@@ -9,6 +9,11 @@
 #include "resman.h"
 #include "levelstate.h"
 #include "blockeditor/blockeditor.h"
+#include "mainmenu/mainmenu.h"
+
+enum class LoadIntent {
+    NO_INTENT, LOAD, NEW, EXIT, SAVEAS
+};
 
 enum PropertiesPanelType {
     CLOSED,
@@ -61,10 +66,18 @@ public:
     void showInputDialog(const std::string& title, const std::string& message, std::function<void(std::string)> onSubmit);
     void runtimeDestroyInteractive(InteractiveObject* object);
     void stopExecution();
+
+    void setProjectFile(const std::string& file);
 protected:
     ResourceManager* resourceManager;
     LevelState levelState;
     BlockEditor m_blockEditor;
+    FileManager m_fileManager;
+
+    bool loadNew = true;
+    std::string projectFile = "";
+    bool chosenFile = false;
+    bool dropFile = false;
 
     GameObject* sfxHandler;
 
@@ -161,4 +174,14 @@ protected:
 
     bool modified = false;
     void SaveProject();
+    void SaveAsProject();
+
+    bool fileMenu = false;
+    bool convertAlert = false;
+    LoadIntent intent = LoadIntent::NO_INTENT;
+    bool escHeld = false;
+    double vmAccumulator = 0.0;
+
+    float autosaveTime = 0.0f;
+    const float autosaveInterval = 60.0f; // save every minute
 };

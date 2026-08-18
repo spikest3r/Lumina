@@ -4,6 +4,10 @@
 #include <unordered_map>
 #include <string>
 #include <optional>
+#include <filesystem>
+#include <thread>
+
+namespace fs = std::filesystem;
 
 static float VecLength(const Vector3& v) {
     return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -242,4 +246,19 @@ std::optional<float> ToFloat(const std::string& str) {
     } catch (...) {
         return std::nullopt;
     }
+}
+
+void DeleteFileAsync(const std::string& filePath) {
+    std::thread([filePath]() {
+        std::error_code ec;
+        bool removed = fs::remove(filePath, ec);
+
+        if (ec) {
+            std::cerr << "Failed to delete file: " << ec.message() << '\n';
+        } else if (removed) {
+            std::cout << "File deleted successfully.\n";
+        } else {
+            std::cout << "File did not exist.\n";
+        }
+    }).detach();
 }

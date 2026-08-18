@@ -53,6 +53,7 @@ public:
 
     bool IsModified();
     void ResetModified();
+    void SetModified();
 
 private:
     std::unordered_map<std::string, LevelObject> levelObjects;
