@@ -14,6 +14,7 @@ enum class ExecutionType : uint8_t {
 struct LevelObject {
     std::string name;
     std::string id;
+    int texture;
     std::string type;
     Transform transform;
     bool isInteractive = false; // TODO

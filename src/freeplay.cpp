@@ -70,7 +70,7 @@ void ComputeOrbitCamera(Vector3 currentPosition,
     outRotation.z = 0.0f;
 }
 
-void ApplyFakeGravity(GameObject* obj, Engine* engine, float dt, float fallSpeed = 9.8f, float groundOffset = 0.05f)
+void ApplyFakeGravity(GameObject* obj, Engine* engine, float dt, float fallSpeed = 9.8f, float groundOffset = 0.05f, float objectOffset = 0.0f)
 {
     Vector3 pos = obj->transform.position;
     Vector3 down = { 0.0f, 0.0f, -1.0f };
@@ -82,18 +82,20 @@ void ApplyFakeGravity(GameObject* obj, Engine* engine, float dt, float fallSpeed
         float groundZ = pos.z - hit.distance;
         float distToGround = pos.z - groundZ;
 
-        if (distToGround > groundOffset)
+        const auto offset = groundOffset + objectOffset;
+
+        if (distToGround > offset)
         {
             float fallStep = fallSpeed * dt;
 
-            if (fallStep > distToGround - groundOffset)
-                fallStep = distToGround - groundOffset;
+            if (fallStep > distToGround - offset)
+                fallStep = distToGround - offset;
 
             obj->transform.position.z -= fallStep;
         }
         else
         {
-            obj->transform.position.z = groundZ + groundOffset;
+            obj->transform.position.z = groundZ + offset;
         }
     }
     else
@@ -172,6 +174,8 @@ void FreeplayScene::UICallback(Engine* engine) {
     if(ToolUI::Button(running ? "Stop" : "Run", toolbarButtonSize) || extToggleF5) {
         extToggleF5 = false;
         if(running) {
+            setToolbarActive(true);
+
             running = false;
             // clear lingering dialogs after execution stopped
             dialogs.clear();
@@ -211,9 +215,11 @@ void FreeplayScene::UICallback(Engine* engine) {
 
             if(status) {
                 closePropertiesPanel();
+                setToolbarActive(false);
                 objectCount = objects.size();
                 haltedObjects = 0;
                 running = true;
+                cameraMode = true;
             }
         }
     }
@@ -273,6 +279,8 @@ void FreeplayScene::UICallback(Engine* engine) {
         if(ToolUI::Button("Eraser")) {
             createBrush("erase", engine);
         }
+        // Color selector
+        ImGui::Combo("Color", &brushColor, brushColors, IM_ARRAYSIZE(brushColors));
         // Simple tiles
         ToolUI::Text("Regular tiles");
         if(ToolUI::Button("Block")) {
@@ -297,8 +305,22 @@ void FreeplayScene::UICallback(Engine* engine) {
         ToolUI::Begin("Objects");
         ToolUI::InputFloat3("Create at", createPos);
         if(ToolUI::Button("Puppet")) {
-            // create puppet
             createObject("puppet", createPos, engine);
+        }
+        if(ToolUI::Button("Apple")) {
+            createObject("apple", createPos, engine);
+        }
+        if(ToolUI::Button("Spider")) {
+            createObject("spider", createPos, engine);
+        }
+        if(ToolUI::Button("Gecko")) {
+            createObject("gecko", createPos, engine);
+        }
+        if(ToolUI::Button("Ghost")) {
+            createObject("ghost", createPos, engine);
+        }
+        if(ToolUI::Button("Hedgehog")) {
+            createObject("hedgehog", createPos, engine);
         }
         ToolUI::End();
     }
@@ -532,6 +554,9 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
         if(ToolUI::Button("Load", fileMenuButtonSize)) {
             intent = LoadIntent::LOAD;
+            if(!levelState.IsModified()) {
+                m_fileManager.Init(FileManager::Mode::OPEN, "", {".lumina"});
+            }
         }
         ToolUI::Separator(HORIZONTAL);
         if(ToolUI::Button("Exit", fileMenuButtonSize)) {
@@ -665,26 +690,28 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
     static bool shiftCam = false;
     static Vector3 prevBrushScale = {0.0f,0.0f,0.0f};
-    if(!cameraMode) {
-        if(hotkeyToggle && engine->getKey(KeyCode::C) == PRESS && !activeBrush) {
-            cameraMode = true;
-            setToolbarActive(false);
-        } else if(hotkeyToggle && engine->getKey(KeyCode::LeftShift) == PRESS) {
-            cameraMode = true;
-            shiftCam = true;
-            setToolbarActive(false);
-            if(activeBrush) {
-                prevBrushScale = brushObject->transform.scale;
-                brushObject->transform.scale = {0.0f,0.0f,0.0f};
+    if(!running) {
+        if(!cameraMode) {
+            if(hotkeyToggle && engine->getKey(KeyCode::C) == PRESS && !activeBrush) {
+                cameraMode = true;
+                setToolbarActive(false);
+            } else if(hotkeyToggle && engine->getKey(KeyCode::LeftShift) == PRESS) {
+                cameraMode = true;
+                shiftCam = true;
+                setToolbarActive(false);
+                if(activeBrush) {
+                    prevBrushScale = brushObject->transform.scale;
+                    brushObject->transform.scale = {0.0f,0.0f,0.0f};
+                }
             }
-        }
-    } else if(shiftCam) {
-        if(engine->getKey(KeyCode::LeftShift) == RELEASE) {
-            cameraMode = false;
-            shiftCam = false;
-            if(!activeBrush) setToolbarActive(true);
-            else {
-                brushObject->transform.scale = prevBrushScale;
+        } else if(shiftCam) {
+            if(engine->getKey(KeyCode::LeftShift) == RELEASE) {
+                cameraMode = false;
+                shiftCam = false;
+                if(!activeBrush) setToolbarActive(true);
+                else {
+                    brushObject->transform.scale = prevBrushScale;
+                }
             }
         }
     }
@@ -787,7 +814,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
                         objectTrans.rotation = rotation;
                         auto name = getUniqueObjectName();
 
-                        LevelObject newObject = {name, name, lastBrushName, objectTrans, false, false};
+                        LevelObject newObject = {name, name, brushColor, lastBrushName, objectTrans, false, false};
                         levelState.AddObject(name, newObject);
                         instantiateObject(engine, newObject);
 
@@ -830,8 +857,8 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         static Vector2 lastMousePosLeft;
         static Vector2 lastMousePosRight;
 
-        bool heldLeft = engine->getMouseButton(MouseButton::Left) == PRESS;
-        bool heldRight = engine->getMouseButton(MouseButton::Right) == PRESS;
+        bool heldLeft = engine->getMouseButton(MouseButton::Right) == PRESS;
+        bool heldRight = engine->getMouseButton(MouseButton::Left) == PRESS;
 
         // orbit
         if (heldLeft && !heldRight)
@@ -861,7 +888,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         }
 
         // pan
-        if (heldRight && !heldLeft)
+        if (heldRight && !heldLeft && !running)
         {
             Vector2 mousePos = engine->getMousePos();
 
@@ -891,7 +918,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         wasHeldLeft = heldLeft;
         wasHeldRight = heldRight;
 
-        if(escOnFrame) {
+        if(escOnFrame && !running) {
             cameraMode = false;
             setToolbarActive(true);
         }
@@ -920,7 +947,8 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         if(escOnFrame && propertiesPanelType != CLOSED) {
             closePropertiesPanel();
         }
-    } else if(running) {
+    }
+    if(running) {
         static bool isLeftHeld;
         bool leftPress = engine->getMouseButton(MouseButton::Left) == PRESS;
 
@@ -1011,7 +1039,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
             UpdateWait(object->waitState, engine);
 
             if (object->gravity) {
-                ApplyFakeGravity(object, engine, dt);
+                ApplyFakeGravity(object, engine, dt, 9.8f, 0.05f, object->zOffset);
             }
         }
 
@@ -1039,6 +1067,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 void FreeplayScene::DestroyScene(Engine* engine) {
     if(chosenFile) {
         std::ofstream("last") << projectFile;
+        DeleteFileAsync("temporary.lumina");
     } else if(!dropFile) {
         SaveProject();
     }
@@ -1052,7 +1081,7 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
     auto puppetTransform = baseTransform;
     puppetTransform.position.z = 3.0f;
     auto puppetID = getUniqueObjectName();
-    LevelObject puppetLO = {"Player", puppetID, "puppet", puppetTransform, true, true};
+    LevelObject puppetLO = {"Player", puppetID, 0, "puppet", puppetTransform, true, true};
     levelState.AddObject(puppetID, puppetLO);
 
     // create 5x5 field
@@ -1064,7 +1093,7 @@ void FreeplayScene::constructGameObjects(Engine* engine) {
             auto objectTrans = baseTransform;
             objectTrans.position = {static_cast<float>(x), static_cast<float>(y), 1.0f};
             auto name = getUniqueObjectName();
-            LevelObject blockLO = {name, name, "block", objectTrans, false, false};
+            LevelObject blockLO = {name, name, 0, "block", objectTrans, false, false};
             levelState.AddObject(name, blockLO);
         }
     }
@@ -1078,7 +1107,7 @@ void FreeplayScene::createBrush(const std::string& name, Engine* engine) {
 
     ObjectData objData;
     if(!eraseBrush) {
-        objData = getObjectData(name);
+        objData = getObjectData(name, brushColor);
         lastBrushName = name;
     }
 
@@ -1123,7 +1152,7 @@ void FreeplayScene::createObject(const std::string& name, const Vector3& pos, En
     auto objectID = getUniqueObjectName();
     std::string objName = name + "_" + objectID;
     // create and add level object
-    LevelObject levelObject = {objName, objectID, name, objectTrans, true, true};
+    LevelObject levelObject = {objName, objectID, 0, name, objectTrans, true, true};
     levelState.AddObject(objectID, levelObject);
     // instantiate object
     InteractiveObject* newObject = static_cast<InteractiveObject*>(instantiateObject(engine, levelObject));
@@ -1159,12 +1188,12 @@ void FreeplayScene::setToolbarActive(bool active) {
     toolbarActive = active;
 }
 
-ObjectData FreeplayScene::getObjectData(std::string objectName) {
+ObjectData FreeplayScene::getObjectData(const std::string& objectName, const int texIdx) {
     auto it = objectResources.find(objectName);
     if(it != objectResources.end()) {
         Mesh* mesh = resourceManager->getMesh(it->second.mesh);
         // TODO: select texture variations
-        Texture* texture = resourceManager->getTexture(it->second.textures[0]);
+        Texture* texture = resourceManager->getTexture(it->second.textures[texIdx]);
         return {mesh, texture};
     } else {
         throw std::runtime_error("Unknown object " + objectName);
@@ -1172,9 +1201,18 @@ ObjectData FreeplayScene::getObjectData(std::string objectName) {
     return {nullptr, nullptr};
 }
 
+float getZoffset(const std::string& id) {
+    auto it = objectResources.find(id);
+    if(it != objectResources.end()) {
+        return it->second.zOffset;
+    } else {
+        return 0.0f;
+    }
+}
+
 Tile* FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object) {
     auto interactive = object.isInteractive;
-    auto objectData = getObjectData(object.type);
+    auto objectData = getObjectData(object.type, object.texture);
     if(interactive) {
         // InteractiveObject
         // instantiate game object
@@ -1195,6 +1233,7 @@ Tile* FreeplayScene::instantiateObject(Engine* engine, const LevelObject& object
         instance->blockData = object.blockData;
         instance->execType = object.execType;
         instance->scene = this;
+        instance->zOffset = getZoffset(object.type);
         // push to level
         sceneEntities[object.id] = instance;
         objects.push_back(instance);

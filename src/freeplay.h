@@ -111,9 +111,9 @@ protected:
     
     virtual void UICallback(Engine* engine);
 
-    void constructGameObjects(Engine* engine);
+    virtual void constructGameObjects(Engine* engine);
 
-    ObjectData getObjectData(std::string objectName);
+    ObjectData getObjectData(const std::string& objectName, const int texIdx = 0);
 
     PhysicsMaterial* baseMaterial;
 
@@ -141,6 +141,9 @@ protected:
     float rot = 0.0f;
     GridPos prevGP;
     Vector3 createPos;
+
+    const char* brushColors[5] = { "Default", "Red", "Green", "Blue", "Yellow" };
+    int brushColor = 0;
 
     std::string getUniqueObjectName();
 

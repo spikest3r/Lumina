@@ -52,4 +52,6 @@ public:
     Engine* engPtr;
     FreeplayScene* scene;
     void Start(Engine* engine) override;
+
+    float zOffset = 0.0f;
 };

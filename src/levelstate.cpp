@@ -45,6 +45,7 @@ void LevelState::Save(const std::string& path) {
         WriteString(out, key);            // map key (redundant with obj.id, but kept explicit)
         WriteString(out, obj.name);
         WriteString(out, obj.id);
+        out.write(reinterpret_cast<const char*>(&obj.texture), sizeof(obj.texture));
         WriteString(out, obj.type);
         out.write(reinterpret_cast<const char*>(&obj.transform), sizeof(Transform));
         out.write(reinterpret_cast<const char*>(&obj.isInteractive), sizeof(bool));
@@ -95,6 +96,10 @@ void LevelState::Load(const std::string& path) {
         ReadString(in, key);
         ReadString(in, obj.name);
         ReadString(in, obj.id);
+        
+        in.read(reinterpret_cast<char*>(&obj.texture), sizeof(obj.texture));
+        if(!in) throw std::runtime_error("LevelState::Load - truncated file (texture)");
+
         ReadString(in, obj.type);
 
         in.read(reinterpret_cast<char*>(&obj.transform), sizeof(Transform));

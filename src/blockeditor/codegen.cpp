@@ -392,19 +392,23 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
 std::optional<std::string> GenerateCode(const std::vector<uint8_t>& blocks, std::string* outError, uint64_t* outErrorBlockId) {
     CodeGenData codeGenData;
 
-    if (!BlockEditor::WalkBlockBlob(blocks, [&codeGenData](BlockInfo b) {
-        if (!codeGenData.hasError) {
-            GenerateBlockCode(b, codeGenData);
+    if(blocks.size() > 0) {
+        if (!BlockEditor::WalkBlockBlob(blocks, [&codeGenData](BlockInfo b) {
+            if (!codeGenData.hasError) {
+                GenerateBlockCode(b, codeGenData);
+            }
+        })) {
+            if (outError) *outError = "Failed to parse block data.";
+            return std::nullopt;
         }
-    })) {
-        if (outError) *outError = "Failed to parse block data.";
-        return std::nullopt;
-    }
 
-    if (codeGenData.hasError) {
-        if (outError) *outError = codeGenData.errorMessage;
-        if (outErrorBlockId) *outErrorBlockId = codeGenData.errorBlockId;
-        return std::nullopt;
+        if (codeGenData.hasError) {
+            if (outError) *outError = codeGenData.errorMessage;
+            if (outErrorBlockId) *outErrorBlockId = codeGenData.errorBlockId;
+            return std::nullopt;
+        }
+    } else {
+        std::cout << "Empty program\n";
     }
 
     auto sc = codeGenData.ss.str();
