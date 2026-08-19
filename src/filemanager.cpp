@@ -173,6 +173,9 @@ void FileManager::Render(const char* windowTitle) {
                 m_hasResult = true;
                 m_isOpen = false;
             }
+            if(!m_resultPath.ends_with(".lumina")) {
+                m_resultPath += ".lumina";
+            }
         }
 
         ImGui::SameLine();

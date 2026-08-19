@@ -174,6 +174,7 @@ void FreeplayScene::UICallback(Engine* engine) {
     if(ToolUI::Button(running ? "Stop" : "Run", toolbarButtonSize) || extToggleF5) {
         extToggleF5 = false;
         if(running) {
+            cameraMode = false;
             setToolbarActive(true);
 
             running = false;
@@ -571,8 +572,15 @@ void FreeplayScene::UICallback(Engine* engine) {
             ToolUI::Text("You have unsaved changes! Do you want to save them before proceeding?");
             bool handle = false;
             if(ToolUI::Button("Yes")) {
-                SaveProject(); // sets modified to false
-                handle = true;
+                if(chosenFile) {
+                    SaveProject();
+                    handle = true;
+                }
+                else {
+                    m_fileManager.Init(FileManager::Mode::SAVE, "", {".lumina"});
+                    intent = LoadIntent::SAVEAS;
+                    nextIntentLoad = true;
+                }
             }
             ToolUI::SameLine();
             if(ToolUI::Button("No")) {
@@ -625,9 +633,15 @@ void FreeplayScene::UICallback(Engine* engine) {
                         if (m_fileManager.HasResult()) {
                             projectFile = m_fileManager.GetResult();
                             m_fileManager.ClearResult();
-                            intent = LoadIntent::NO_INTENT;
                             SaveProject();
                             chosenFile = true;
+                            if(!nextIntentLoad) {
+                                intent = LoadIntent::NO_INTENT;
+                            } else {
+                                nextIntentLoad = false;
+                                intent = LoadIntent::LOAD;
+                                m_fileManager.Init(FileManager::Mode::OPEN, "", {".lumina"});
+                            }
                         } else if (!m_fileManager.IsOpen() && !m_fileManager.HasResult()) {
                             intent = LoadIntent::NO_INTENT;
                         }

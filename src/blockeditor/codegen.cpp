@@ -109,7 +109,6 @@ ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData&
         switch (pb.type) {
             case BlockType::Variable: {
                 auto varName = pb.fields[0].text;
-                // TODO: check if starts with digit and error
                 if (!IsValidVariableName(varName)) {
                     SetError(data, pb.id, "Invalid variable name: '" + varName + "'");
                     return {"", ExprType::Unknown};
@@ -236,8 +235,34 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
 
     switch (b.type) {
         case BlockType::HeadBlock:
-            ss << "# Generated from blocks\n";
+            ss << "# Main entry point\n";
             break;
+        case BlockType::HeadRoutine:
+            {
+                auto name = b.fields[0].text;
+                if (!IsValidVariableName(name)) {
+                    SetError(codeGenData, b.id, "Invalid routine name: '" + name + "'");
+                    return;
+                }
+                ss << "# Routine " << name << "\n";
+                ss << "routine " << name << "\n";
+                break;
+            }
+        case BlockType::ExecuteRoutine:
+            {
+                auto name = b.fields[0].text;
+                if (!IsValidVariableName(name)) {
+                    SetError(codeGenData, b.id, "Invalid routine name: '" + name + "'");
+                    return;
+                }
+                ss << "call " << name << "\n";
+                break;
+            }
+        case BlockType::EndRoutine:
+            {
+                ss << "endroutine\n";
+                break;
+            }
         case BlockType::MoveForward:
             {
                 auto res = getFieldValue(b, 0, codeGenData);
@@ -281,7 +306,7 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
             }
         case BlockType::SetVariable:
             {
-                auto name = b.fields[0].text; // TODO: check if starts with digit and error
+                auto name = b.fields[0].text; 
                 if (!IsValidVariableName(name)) {
                     SetError(codeGenData, b.id, "Invalid variable name: '" + name + "'");
                     return;
@@ -301,19 +326,19 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
             }
         case BlockType::Forever:
             {
-                auto myLabel = getTempLabel(tempCounter); // get label for this block
-                ss << "label " << myLabel << "\n"; // define label
+                auto myLabel = getTempLabel(tempCounter); 
+                ss << "label " << myLabel << "\n"; 
                 for(const BlockInfo& childInfo : b.subStacks[0]) {
                     GenerateBlockCode(childInfo, codeGenData);
                     if (codeGenData.hasError) return;
                 }
-                ss << "jump " << myLabel << "\n"; // jump to defined label
+                ss << "jump " << myLabel << "\n"; 
                 break;
             }
         case BlockType::Repeat:
             {
                 auto counterLabel = "cnt_" + std::to_string(depth++);
-                auto myLabel = getTempLabel(tempCounter); // get label for this block
+                auto myLabel = getTempLabel(tempCounter); 
                 auto timesRes = getFieldValue(b, 0, codeGenData);
                 if (codeGenData.hasError) return;
                 if (timesRes.type == ExprType::String) {
@@ -321,7 +346,7 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                     return;
                 }
                 ss << counterLabel << " = 0\n";
-                ss << "label " << myLabel << "\n"; // define label
+                ss << "label " << myLabel << "\n"; 
                 for(const BlockInfo& childInfo : b.subStacks[0]) {
                     GenerateBlockCode(childInfo, codeGenData);
                     if (codeGenData.hasError) return;
@@ -391,6 +416,8 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
 
 std::optional<std::string> GenerateCode(const std::vector<uint8_t>& blocks, std::string* outError, uint64_t* outErrorBlockId) {
     CodeGenData codeGenData;
+
+    codeGenData.ss << "# Generated from blocks\n";
 
     if(blocks.size() > 0) {
         if (!BlockEditor::WalkBlockBlob(blocks, [&codeGenData](BlockInfo b) {

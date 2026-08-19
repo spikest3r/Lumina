@@ -41,7 +41,10 @@ enum class BlockType {
     LogicLessEqual,
     LogicGreaterEqual,
     LogicNot,
-    Concat
+    Concat,
+    HeadRoutine,
+    ExecuteRoutine,
+    EndRoutine
 };
 
 inline bool IsSlotOnlyBlockType(BlockType type) {
@@ -110,7 +113,8 @@ struct Block {
     Block* parentSubStack = nullptr;
     int parentSubStackIndex = -1;
 
-    bool IsHead() const { return type == BlockType::HeadBlock; }
+    bool IsMainHead() const { return type == BlockType::HeadBlock; }
+    bool IsHead() const { return type == BlockType::HeadBlock || type == BlockType::HeadRoutine; }
     bool IsSlotOnly() const { return IsSlotOnlyBlockType(type); }
     bool IsPluggedIn() const { return slotParent != nullptr; }
     bool IsInSubStack() const { return parentSubStack != nullptr; }
@@ -131,6 +135,30 @@ struct BlockInfo {
         std::string text;
         SlotType allowedType = SlotType::Any;
         std::unique_ptr<BlockInfo> plugged;
+
+        Field() = default;
+        ~Field() = default;
+
+        // Move operations
+        Field(Field&&) noexcept = default;
+        Field& operator=(Field&&) noexcept = default;
+
+        // Explicit Deep Copy operations required due to unique_ptr
+        Field(const Field& other)
+            : name(other.name)
+            , text(other.text)
+            , allowedType(other.allowedType)
+            , plugged(other.plugged ? std::make_unique<BlockInfo>(*other.plugged) : nullptr) {}
+
+        Field& operator=(const Field& other) {
+            if (this != &other) {
+                name = other.name;
+                text = other.text;
+                allowedType = other.allowedType;
+                plugged = other.plugged ? std::make_unique<BlockInfo>(*other.plugged) : nullptr;
+            }
+            return *this;
+        }
     };
 
     uint64_t id = 0;
@@ -138,6 +166,32 @@ struct BlockInfo {
     std::string label;
     std::vector<Field> fields;
     std::vector<std::vector<BlockInfo>> subStacks;
+
+    BlockInfo() = default;
+    ~BlockInfo() = default;
+
+    // Move operations
+    BlockInfo(BlockInfo&&) noexcept = default;
+    BlockInfo& operator=(BlockInfo&&) noexcept = default;
+
+    // Explicit Deep Copy operations
+    BlockInfo(const BlockInfo& other)
+        : id(other.id)
+        , type(other.type)
+        , label(other.label)
+        , fields(other.fields)
+        , subStacks(other.subStacks) {}
+
+    BlockInfo& operator=(const BlockInfo& other) {
+        if (this != &other) {
+            id = other.id;
+            type = other.type;
+            label = other.label;
+            fields = other.fields;
+            subStacks = other.subStacks;
+        }
+        return *this;
+    }
 };
 
 class BlockEditor {

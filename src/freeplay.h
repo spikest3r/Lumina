@@ -182,6 +182,7 @@ protected:
     bool fileMenu = false;
     bool convertAlert = false;
     LoadIntent intent = LoadIntent::NO_INTENT;
+    bool nextIntentLoad = false;
     bool escHeld = false;
     double vmAccumulator = 0.0;
 

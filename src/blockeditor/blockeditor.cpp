@@ -66,7 +66,7 @@ struct ParsedBlock {
 
 bool IsKnownBlockTypeValue(uint32_t v) {
     return v >= static_cast<uint32_t>(BlockType::HeadBlock) &&
-           v <= static_cast<uint32_t>(BlockType::Concat);
+           v <= static_cast<uint32_t>(BlockType::EndRoutine);
 }
 
 bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
@@ -319,6 +319,12 @@ void BlockEditor::ClearErrors() {
 }
 
 void BlockEditor::InitPalette() {
+    m_palette.push_back({ BlockType::HeadRoutine, "Routine", IM_COL32(200, 90, 90, 255),
+                           { SlotTemplate{ "name", "my_routine", SlotType::Text } } });
+
+    m_palette.push_back({ BlockType::ExecuteRoutine, "Execute Routine", IM_COL32(220, 160, 40, 255),
+                           { SlotTemplate{ "name", "my_routine", SlotType::Text } } });
+
     m_palette.push_back({ BlockType::MoveForward, "Move Forward", IM_COL32(90, 140, 210, 255),
                            { SlotTemplate{ "value", "5", SlotType::Number } } });
 
@@ -656,7 +662,7 @@ void BlockEditor::UpdateDeletion() {
     if (!ImGui::IsKeyPressed(ImGuiKey_Delete)) return;
 
     if (m_draggingBlock) {
-        if (m_draggingBlock->IsHead()) return;
+        if (m_draggingBlock->IsMainHead()) return;
         Block* toDelete = m_draggingBlock;
         m_draggingBlock = nullptr;
         m_snapTarget = nullptr;
@@ -672,7 +678,7 @@ void BlockEditor::UpdateDeletion() {
         return;
     }
 
-    if (m_hoveredBlock && !m_hoveredBlock->IsHead()) {
+    if (m_hoveredBlock && !m_hoveredBlock->IsMainHead()) {
         Block* toDelete = m_hoveredBlock;
         m_hoveredBlock = nullptr;
         DeleteBlock(toDelete);
@@ -724,7 +730,7 @@ void ClearDanglingRefs(Editor* ed, Block* cur, Block*& snapTarget, Block*& snapS
 } 
 
 void BlockEditor::DeleteBlock(Block* block) {
-    if (!block || block->IsHead()) return;
+    if (!block || block->IsMainHead()) return;
 
     for (auto& slot : block->slots) {
         if (slot.plugged) {
@@ -763,7 +769,7 @@ void BlockEditor::DeleteBlock(Block* block) {
 }
 
 void BlockEditor::DeleteChain(Block* chainStart) {
-    if (!chainStart || chainStart->IsHead()) return;
+    if (!chainStart || chainStart->IsMainHead()) return;
 
     if (chainStart->prev) chainStart->prev->next = nullptr;
     if (chainStart->parentSubStack) chainStart->parentSubStack->subStacks[chainStart->parentSubStackIndex] = nullptr;
@@ -1127,7 +1133,7 @@ void BlockEditor::DrawCanvas() {
 }
 
 ImU32 BlockEditor::GetBlockColor(BlockType type) const {
-    if (type == BlockType::HeadBlock) return IM_COL32(200, 90, 90, 255);
+    if (type == BlockType::HeadBlock || type == BlockType::HeadRoutine) return IM_COL32(200, 90, 90, 255);
     for (const auto& tmpl : m_palette) {
         if (tmpl.type == type) return tmpl.color;
     }
@@ -1475,6 +1481,21 @@ bool BlockEditor::WalkBlockBlob(const std::vector<uint8_t>& data,
         return nullptr;
     };
 
+    // Synthesize and walk routine executions first before primary loop
+    for (const auto& pb : parsed) {
+        if (pb.type == static_cast<uint32_t>(BlockType::HeadRoutine) && pb.prevId == 0) {
+            for (const ParsedBlock* cur = &pb; cur; cur = findById(cur->nextId)) {
+                visit(BuildBlockInfo(*cur, findById));
+            }
+            BlockInfo endInfo;
+            endInfo.id = 0;
+            endInfo.type = BlockType::EndRoutine;
+            endInfo.label = "EndRoutine";
+            visit(endInfo);
+        }
+    }
+
+    // Standard main code output
     const ParsedBlock* head = findById(headId);
     if (!head) return false;
 
