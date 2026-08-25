@@ -337,25 +337,31 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
             }
         case BlockType::Repeat:
             {
-                auto counterLabel = "cnt_" + std::to_string(depth++);
-                auto myLabel = getTempLabel(tempCounter); 
                 auto timesRes = getFieldValue(b, 0, codeGenData);
                 if (codeGenData.hasError) return;
                 if (timesRes.type == ExprType::String) {
                     SetError(codeGenData, b.id, "Repeat requires a numeric count");
                     return;
                 }
-                ss << counterLabel << " = 0\n";
-                ss << "label " << myLabel << "\n"; 
+                ss << "repeat " << timesRes.code << "\n";
                 for(const BlockInfo& childInfo : b.subStacks[0]) {
                     GenerateBlockCode(childInfo, codeGenData);
                     if (codeGenData.hasError) return;
                 }
-                ss << counterLabel << " = " << counterLabel << " + 1\n";
-                ss << "if " << counterLabel << " < " << timesRes.code << "\n";
-                ss << "jump " << myLabel << "\n";
-                ss << "endif\n";
+                ss << "endrepeat\n";
                 depth--;
+                break;
+            }
+        case BlockType::While:
+            {
+                auto condRes = getFieldValue(b, 0, codeGenData);
+                if (codeGenData.hasError) return;
+                ss << "while " << condRes.code << "\n";
+                for(const BlockInfo& childInfo : b.subStacks[0]) {
+                    GenerateBlockCode(childInfo, codeGenData);
+                    if (codeGenData.hasError) return;
+                }
+                ss << "endwhile\n";
                 break;
             }
         case BlockType::If:

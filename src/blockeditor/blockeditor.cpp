@@ -366,6 +366,9 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::Repeat, "Repeat", IM_COL32(220, 160, 40, 255),
                            { SlotTemplate{"times", "10", SlotType::Number} }, 1, {""} });
 
+    m_palette.push_back({ BlockType::While, "While", IM_COL32(220, 160, 40, 255),
+                        { SlotTemplate{"condition", "1", SlotType::Logic} }, 1, {""} });
+
     ImU32 sensorColor = IM_COL32(255, 180, 120, 255);
     m_palette.push_back({ BlockType::IsKeyDown, "Is Key Down", sensorColor, 
         { SlotTemplate{"Key", "W", SlotType::Text} } });

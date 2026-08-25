@@ -30,6 +30,7 @@ enum class BlockType {
     IfElse,
     Forever,
     Repeat,
+    While,
     MathAdd,
     MathSub,
     MathMul,
@@ -258,7 +259,6 @@ private:
 
     uint64_t NextId() { return m_nextId++; }
 
-private:
     std::vector<std::unique_ptr<Block>> m_blocks;
     std::vector<BlockTemplate> m_palette;
 
