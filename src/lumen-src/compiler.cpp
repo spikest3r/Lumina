@@ -5,6 +5,18 @@ struct Function {
     uint8_t argCount;
 };
 
+enum class BlockType {
+    IF,
+    WHILE,
+    REPEAT
+};
+
+struct LoopJumpData {
+    int locStart;
+    std::vector<int> unresolvedEnds;
+    std::string iteratorVarName;
+};
+
 inline void emitUint32(std::vector<uint8_t>& bytecode, uint32_t value) {
     bytecode.push_back(value & 0xFF);
     bytecode.push_back((value >> 8) & 0xFF);
@@ -86,10 +98,16 @@ std::unordered_map<std::string, Function> funcList = {
     {"stopAll", {0xBF, 0}},
 };
 
-void printError(std::string error, int line, std::string& errorBuffer) {
+static std::string errorBuffer;
+
+void printError(std::string error, int line) {
     std::stringstream ss;
     ss << "Error on line " << line << std::endl << "    >>> " << error << std::endl;
     errorBuffer += ss.str();
+}
+
+std::string getCompilerError() {
+    return errorBuffer;
 }
 
 void pushToStack(std::string token, CompilerData* data, std::vector<uint8_t>& bytecode) {
@@ -117,15 +135,10 @@ void pushToStack(std::string token, CompilerData* data, std::vector<uint8_t>& by
     }
 }
 
-int compile(const std::string& script,
+int compileFromStream(std::istream& input,
     CompilerData* compilerData,
-    std::string& errBuffer,
-    bool verbose, bool debugInfo
+    bool verbose, bool debugInfo, std::string fileName
 ) {
-    errBuffer.clear();
-
-    std::istringstream file(script);
-
     std::string line;
 
     std::unordered_map<std::string, int> globalLabels;
@@ -136,14 +149,18 @@ int compile(const std::string& script,
     std::vector<UnresolvedJump> unresolvedRoutineCalls;
     std::vector<UnresolvedJump> unresolvedJumps;
     std::vector<int> condJumpStack;
-    std::vector<int> elseJumpStack;
+    std::vector<std::vector<int>> elseJumpStack;
 
     std::string functionArgument = "";
 
-    int blockDepth = 0;
+    std::vector<BlockType> blockDepth;
     std::vector<bool> elseDefined;
 
-    int lineIndex = 1; // for user messages
+    std::vector<LoopJumpData> loopCondJumpStack;
+
+    std::string conditionTokens;
+
+    int lineIndex = 1;
     bool inRoutine = false;
     int routineIndex = -1;
     int routineCount = 0;
@@ -151,7 +168,9 @@ int compile(const std::string& script,
     int funcArgs = 0;
     int requiredFuncArgs = 0;
 
-    while (std::getline(file, line)) {
+    int loopDepth = 0;
+
+    while (std::getline(input, line)) {
         if (verbose) std::cout << line << std::endl;
         auto tokens = tokenizeFormula(line);
         if (verbose) {
@@ -182,7 +201,7 @@ int compile(const std::string& script,
                         formula, compilerData, bytecode
                     ); // result in stack
                 } catch (const std::exception& e) {
-                    printError(e.what(), lineIndex, errBuffer);
+                    printError(e.what(), lineIndex);
                     return -1;
                 }
                 
@@ -195,7 +214,7 @@ int compile(const std::string& script,
             }
             else if (token == "label") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex, errBuffer);
+                    printError("Syntax error", lineIndex);
                     return -1;
                 }
                 op = LABEL;
@@ -203,7 +222,7 @@ int compile(const std::string& script,
             }
             else if (token == "jump") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex, errBuffer);
+                    printError("Syntax error", lineIndex);
                     return -1;
                 }
                 op = JUMP;
@@ -211,24 +230,32 @@ int compile(const std::string& script,
             }
             else if (token == "if") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex, errBuffer);
+                    printError("Syntax error", lineIndex);
                     return -1;
                 }
                 op = IF;
-                blockDepth++;
+                blockDepth.push_back(BlockType::IF);
                 elseDefined.push_back(false);
                 condJumpStack.push_back(-1);
-                elseJumpStack.push_back(-1);
+                elseJumpStack.push_back({-1});
                 continue;
             }
             else if (token == "endif") {
-                if (blockDepth == 0) {
-                    printError("Unexpected 'endif' (no matching 'if')", lineIndex, errBuffer);
+                if (blockDepth.back() != BlockType::IF) {
+                    printError("Unexpected 'endif' (no matching 'if')", lineIndex);
                     return -1;
                 }
-                if (elseDefined[blockDepth - 1]) {
-                    int loc = elseJumpStack.back();
-                    patchUint32(bytecode, loc, static_cast<uint32_t>(bytecode.size()));
+                bool isElseDefined = elseDefined.back();
+                int i;
+                for (i = blockDepth.size() - 1; i > 0; i--) {
+                    if (blockDepth[i] == BlockType::IF) break;
+                }
+                if (isElseDefined) {
+                    auto toPatch = elseJumpStack.back();
+                    for (auto loc : toPatch) {
+                        if (loc == -1) continue;
+                        patchUint32(bytecode, loc, static_cast<uint32_t>(bytecode.size()));
+                    }
                 }
                 else {
                     int loc = condJumpStack.back();
@@ -236,16 +263,16 @@ int compile(const std::string& script,
                 }
                 condJumpStack.pop_back();
                 elseJumpStack.pop_back();
-                blockDepth--;
+                blockDepth.erase(blockDepth.begin() + i);
                 elseDefined.pop_back();
                 continue;
             }
             else if (token == "else") {
-                if (blockDepth == 0) {
-                    printError("Unexpected 'else' (no matching 'if')", lineIndex, errBuffer);
+                if (blockDepth.size() == 0 || blockDepth.back() != BlockType::IF) {
+                    printError("Unexpected 'else' (no matching 'if')", lineIndex);
                     return -1;
                 }
-                elseDefined[blockDepth - 1] = true;
+                elseDefined.back() = true;
                 int loc = condJumpStack.back();
 
                 // Patch false-jump location to skip the upcoming 5-byte 'JUMP32 target' instruction (1 byte opcode + 4 bytes uint32)
@@ -253,25 +280,123 @@ int compile(const std::string& script,
 
                 bytecode.push_back(0x06); // JUMP32
                 emitUint32(bytecode, 0x00000000);
-                elseJumpStack.back() = static_cast<int>(bytecode.size() - 4); // Track location of jump target
+                elseJumpStack.back().back() = static_cast<int>(bytecode.size() - 4); // Track location of jump target
+                continue;
+            } else if(token == "elif") {
+                // else
+                if (blockDepth.size() == 0 || blockDepth.back() != BlockType::IF) {
+                    printError("Unexpected 'elif' (no matching 'if')", lineIndex);
+                    return -1;
+                }
+                elseDefined.back() = true;
+                int loc = condJumpStack.back();
+
+                // Patch false-jump location to skip the upcoming 5-byte 'JUMP32 target' instruction (1 byte opcode + 4 bytes uint32)
+                patchUint32(bytecode, loc, static_cast<uint32_t>(bytecode.size() + 5));
+
+                bytecode.push_back(0x06); // JUMP32
+                emitUint32(bytecode, 0x00000000);
+                elseJumpStack.back().back() = static_cast<int>(bytecode.size() - 4); // Track location of jump target
+
+                // if
+                condJumpStack.push_back(-1);
+                elseJumpStack.back().push_back(-1);
+                op = IF;
+
+                continue;
+            }
+            else if (token == "while") {
+                if (op != NONE) {
+                    printError("Syntax error", lineIndex);
+                    return -1;
+                }
+                op = WHILE;
+                loopDepth++;
+                blockDepth.push_back(BlockType::WHILE);
+                loopCondJumpStack.push_back(LoopJumpData{ static_cast<int>(bytecode.size()), {} });
+                continue;
+            }
+            else if (token == "endwhile") {
+                if (blockDepth.size() == 0 || blockDepth.back() != BlockType::WHILE) {
+                    printError("Unexpected 'endwhile' (no matching 'while')", lineIndex);
+                    return -1;
+                }
+                loopDepth--;
+                auto loopData = loopCondJumpStack.back();
+                bytecode.push_back(0x06);
+                emitUint32(bytecode, static_cast<uint32_t>(loopData.locStart));
+                for (auto& loc : loopData.unresolvedEnds) {
+                    patchUint32(bytecode, loc, static_cast<uint32_t>(bytecode.size()));
+                }
+                loopCondJumpStack.pop_back();
+                blockDepth.pop_back();
+                continue;
+            }
+            else if (token == "repeat") {
+                if (op != NONE) {
+                    printError("Syntax error", lineIndex);
+                    return -1;
+                }
+                op = REPEAT;
+                loopDepth++;
+                blockDepth.push_back(BlockType::REPEAT);
+                continue;
+            }
+            else if (token == "endrepeat") {
+                if (blockDepth.size() == 0 || blockDepth.back() != BlockType::REPEAT) {
+                    printError("Unexpected 'endrepeat' (no matching 'repeat')", lineIndex);
+                    return -1;
+                }
+                loopDepth--;
+
+                auto loopData = loopCondJumpStack.back();
+                bytecode.push_back(0x06);
+                emitUint32(bytecode, static_cast<uint32_t>(loopData.locStart));
+                for (auto& loc : loopData.unresolvedEnds) {
+                    patchUint32(bytecode, loc, static_cast<uint32_t>(bytecode.size()));
+                }
+                loopCondJumpStack.pop_back();
+                blockDepth.pop_back();
                 continue;
             }
             else if (token == "halt") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex, errBuffer);
+                    printError("Syntax error", lineIndex);
                     return -1;
                 }
                 bytecode.push_back(0xFF);
+                
                 continue;
+            }
+            else if (token == "continue") {
+                if (loopDepth <= 0) {
+                    printError("Unexpected 'continue' (outside loop body)", lineIndex);
+                    return -1;
+                }
+
+                auto loopData = loopCondJumpStack.back();
+                bytecode.push_back(0x06);
+                emitUint32(bytecode, static_cast<uint32_t>(loopData.locStart));
+            }
+            else if (token == "break") {
+                if (loopDepth <= 0) {
+                    printError("Unexpected 'break' (outside loop body)", lineIndex);
+                    return -1;
+                }
+
+                bytecode.push_back(0x06); // jump
+                int loc = static_cast<int>(bytecode.size()); // location for patch
+                emitUint32(bytecode, 0x00000000); // jump offset
+                loopCondJumpStack.back().unresolvedEnds.push_back(loc);
             }
             else if (token == "routine") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex, errBuffer);
+                    printError("Syntax error", lineIndex);
                     return -1;
                 }
                 op = SUBROUTINE;
                 if (inRoutine) {
-                    printError("Nested routines are not allowed", lineIndex, errBuffer);
+                    printError("Nested routines are not allowed", lineIndex);
                     return -1;
                 }
                 inRoutine = true;
@@ -279,11 +404,11 @@ int compile(const std::string& script,
             }
             else if (token == "endroutine") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex, errBuffer);
+                    printError("Syntax error", lineIndex);
                     return -1;
                 }
                 if (!inRoutine) {
-                    printError("Unexpected 'endroutine' (no matching 'routine')", lineIndex, errBuffer);
+                    printError("Unexpected 'endroutine' (no matching 'routine')", lineIndex);
                     return -1;
                 }
                 bytecode.push_back(0xFE); // RET
@@ -293,7 +418,7 @@ int compile(const std::string& script,
             }
             else if (token == "call") {
                 if (tokens.size() < 2) {
-                    printError("Syntax error: expected subroutine name after 'call'", lineIndex, errBuffer);
+                    printError("Syntax error: expected subroutine name after 'call'", lineIndex);
                     return -1;
                 }
                 std::string routineName = tokens[1];
@@ -314,7 +439,7 @@ int compile(const std::string& script,
                         funcArgs = 0;
                         requiredFuncArgs = it->second.argCount;
                     } else if(tokens[1] != "=") {
-                        printError("Unknown function: " + token, lineIndex, errBuffer);
+                        printError("Unknown function: " + token, lineIndex);
                         return -1;
                     }
                     continue;
@@ -340,7 +465,7 @@ int compile(const std::string& script,
                             functionArgument, compilerData, bytecode
                         ); // result in stack
                     } catch (const std::exception& e) {
-                        printError(e.what(), lineIndex, errBuffer);
+                        printError(e.what(), lineIndex);
                         return -1;
                     }
                     funcArgs++;
@@ -396,23 +521,92 @@ int compile(const std::string& script,
                 op = NONE;
             }
             break;
+            case REPEAT:
+            {
+                if (token == ",") continue; // skip delimiter char
+                if (conditionArgs == 0) {
+                    // init var
+                    auto variable = "cnt_" + std::to_string(blockDepth.size());
+                    pushToStack("-1", compilerData, bytecode);
+                    bytecode.push_back(0x02); // POP
+                    auto idx = resolveVariableIndex(variable, compilerData);
+                    bytecode.push_back(idx); // to other variable
+
+                    // mark loop start
+                    loopCondJumpStack.push_back(LoopJumpData{ static_cast<int>(bytecode.size()), {} });
+
+                    // if x < n
+                    pushToStack(variable, compilerData, bytecode); // x
+                    pushToStack(token, compilerData, bytecode); // n
+                    bytecode.push_back(0xC2); // x < n
+                    int loc = static_cast<int>(bytecode.size()); // location for patch
+                    emitUint32(bytecode, 0x00000000); // jump offset
+                    loopCondJumpStack.back().unresolvedEnds.push_back(loc);
+
+                    // x = x + 1
+                    try {
+                        // x + 1
+                        compileExpression(
+                            variable + " + 1", compilerData, bytecode
+                        ); // result in stack
+                    }
+                    catch (const std::exception& e) {
+                        printError(e.what(), lineIndex);
+                        return -1;
+                    }
+
+                    bytecode.push_back(0x02); // POP
+                    auto var_index = resolveVariableIndex(variable, compilerData);
+                    bytecode.push_back(var_index); // to x
+                }
+                else  if (conditionArgs == 1) {
+                    // iterator var name arg
+
+                    auto variable = "cnt_" + std::to_string(blockDepth.size());
+                    pushToStack(variable, compilerData, bytecode);
+                    bytecode.push_back(0x02); // POP
+                    auto var_index = resolveVariableIndex(token, compilerData);
+                    bytecode.push_back(var_index); // to other variable
+                } 
+                else {
+                    printError("Too much arguments", lineIndex);
+                    return -1;
+                }
+                conditionArgs++;
+            }
+            break;
+            case WHILE:
             case IF:
             {
                 auto it = condOpMap.find(keyword);
                 if (it != condOpMap.end()) {
-                    if (conditionArgs != 1) {
-                        printError("Syntax error", lineIndex, errBuffer);
+                    if (condOp != COP_NONE || conditionTokens.size() == 0) {
+                        printError("Syntax error", lineIndex);
+                        return -1;
+                    } 
+
+                    // compile expression
+                    try {
+                        compileExpression(
+                            conditionTokens, compilerData, bytecode
+                        ); // result in stack
+                        conditionTokens.clear();
+                    }
+                    catch (const std::exception& e) {
+                        printError(e.what(), lineIndex);
                         return -1;
                     }
+
+                    conditionArgs++;
+
                     condOp = it->second;
                 }
                 else {
                     if (conditionArgs > 1 && condOp != COP_NONE) {
-                        printError("Syntax error", lineIndex, errBuffer);
+                        printError("Syntax error", lineIndex);
                         return -1;
                     }
-                    pushToStack(token, compilerData, bytecode);
-                    conditionArgs++;
+                    conditionTokens += token;
                 }
             }
             break;
@@ -429,7 +623,7 @@ int compile(const std::string& script,
                         functionArgument, compilerData, bytecode
                     ); // result in stack
                 } catch (const std::exception& e) {
-                    printError(e.what(), lineIndex, errBuffer);
+                    printError(e.what(), lineIndex);
                     return -1;
                 }
                 funcArgs++;
@@ -443,27 +637,53 @@ int compile(const std::string& script,
                 std::stringstream ss;
                 ss << "argument count mismatch for '" << key << "': expected " 
                     << requiredFuncArgs << ", got " << funcArgs << "\n";
-                printError(ss.str(), lineIndex, errBuffer);
+                printError(ss.str(), lineIndex);
                 return -1;
             }
             bytecode.push_back(0x04); // call function
             bytecode.push_back(funcIndex);
             break;
+        case WHILE:
         case IF:
         {
+            if (conditionTokens.size() == 0) {
+                printError("Syntax error", lineIndex);
+                return -1;
+            }
+
+            // compile expression
+            try {
+                compileExpression(
+                    conditionTokens, compilerData, bytecode
+                ); // result in stack
+                conditionTokens.clear();
+            }
+            catch (const std::exception& e) {
+                printError(e.what(), lineIndex);
+                return -1;
+            }
+            conditionArgs++;
+
             auto it = condOpcodeMap.find(condOp);
             if (it != condOpcodeMap.end()) {
                 if (conditionArgs != 2) {
-                    printError("Syntax error", lineIndex, errBuffer);
+                    printError("Syntax error", lineIndex);
                     return -1;
                 }
                 bytecode.push_back(it->second); // IF32 opcode
                 int loc = static_cast<int>(bytecode.size());
                 emitUint32(bytecode, 0x00000000);
-                condJumpStack.back() = loc;
+                switch (op) {
+                case IF:
+                    condJumpStack.back() = loc;
+                    break;
+                case WHILE:
+                    loopCondJumpStack.back().unresolvedEnds.push_back(loc);
+                    break;
+                }
             }
             else {
-                printError("Syntax error", lineIndex, errBuffer);
+                printError("Syntax error", lineIndex);
                 return -1;
             }
         }
@@ -485,7 +705,7 @@ int compile(const std::string& script,
                 patchUint32(compilerData->bytecode, it.location, static_cast<uint32_t>(it2->second));
             }
             else {
-                printError("Label '" + it.keyword + "' is not defined in global scope", it.line, errBuffer);
+                printError("Label '" + it.keyword + "' is not defined in global scope", it.line);
                 return -1;
             }
         }
@@ -510,7 +730,7 @@ int compile(const std::string& script,
                     patchUint32(subroutineBytecode[idx], jump.location, relativeTarget);
                 }
                 else {
-                    printError("Label '" + jump.keyword + "' is not defined in routine scope", jump.line, errBuffer);
+                    printError("Label '" + jump.keyword + "' is not defined in routine scope", jump.line);
                     return -1;
                 }
             }
@@ -541,35 +761,68 @@ int compile(const std::string& script,
             }
         }
         else {
-            printError("Subroutine '" + keyword + "' is not defined", line, errBuffer);
+            printError("Subroutine '" + keyword + "' is not defined", line);
             return -1;
         }
     }
 
-    // if (debugInfo) {
-    //     std::ofstream debugFile(fileName + ".bin.dbg");
-    //     if (debugFile.is_open()) {
-    //         // Write variable names and their indices
-    //         debugFile << "variables" << std::endl;
-    //         for (const auto& var : compilerData->variableMap) {
-    //             debugFile << var.first << " " << var.second << std::endl;
-    //         }
-    //         // Write subroutine names, their bytecode offsets and bytecode length
-    //         debugFile << "routines" << std::endl;
-    //         for (const auto& sub : subroutineIndexMap) {
-    //             debugFile << sub.first << std::endl;
-    //             debugFile << routineOffsets[sub.second] << std::endl;
-    //             debugFile << subroutineBytecode[sub.second].size() << std::endl;
-    //         }
-    //         // Write exec functions
-    //         debugFile << "exec" << std::endl;
-    //         for (const auto& func : funcList) {
-    //             debugFile << func.first << " " << func.second.opcode << std::endl;
-    //         }
-    //     }
-    // }
+    if (debugInfo && fileName.size() > 0) {
+        std::ofstream debugFile(fileName + ".bin.dbg");
+        if (debugFile.is_open()) {
+            // Write variable names and their indices
+            debugFile << "variables" << std::endl;
+            for (const auto& var : compilerData->variableMap) {
+                debugFile << var.first << " " << var.second << std::endl;
+            }
+            // Write subroutine names, their bytecode offsets and bytecode length
+            debugFile << "routines" << std::endl;
+            for (const auto& sub : subroutineIndexMap) {
+                debugFile << sub.first << std::endl;
+                debugFile << routineOffsets[sub.second] << std::endl;
+                debugFile << subroutineBytecode[sub.second].size() << std::endl;
+            }
+            // Write exec functions
+            debugFile << "exec" << std::endl;
+            for (const auto& func : funcList) {
+                debugFile << func.first << " " << func.second.opcode << std::endl;
+            }
+        }
+    }
 
     compilerData->variableCount = static_cast<int>(compilerData->variableMap.size());
 
     return 0;
+}
+
+int compileFromFile(std::ifstream& file,
+    CompilerData* compilerData,
+    bool verbose, bool debugInfo, std::string fileName
+) {
+    if (!file.is_open()) {
+        std::cerr << "File is not open" << std::endl;
+        return -1;
+    }
+    return compileFromStream(file, compilerData, verbose, debugInfo, fileName);
+}
+
+int compileFromText(const std::string& text,
+    CompilerData* compilerData,
+    bool verbose, bool debugInfo, std::string fileName
+) {
+    std::istringstream stream(text);
+    return compileFromStream(stream, compilerData, verbose, debugInfo, fileName);
+}
+
+int compile(std::string fileName,
+    CompilerData* compilerData,
+    bool verbose, bool debugInfo
+) {
+    std::ifstream file(fileName);
+    if (!file.is_open()) {
+        std::cerr << "Could not open file: " << fileName << std::endl;
+        return -1;
+    }
+    int result = compileFromFile(file, compilerData, verbose, debugInfo, fileName);
+    file.close();
+    return result;
 }

@@ -82,6 +82,7 @@ protected:
     GameObject* sfxHandler;
 
     void instantiateLevel(Engine* engine);
+    void resetLevel(Engine* engine);
     Tile* instantiateObject(Engine* engine, const LevelObject& object);
     
     void InitScene(Engine* engine) override;

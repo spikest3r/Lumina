@@ -182,7 +182,7 @@ void FreeplayScene::UICallback(Engine* engine) {
             dialogs.clear();
             inputDialogs.clear();
             // reinstantiate original state
-            instantiateLevel(engine);
+            resetLevel(engine);
         } else {
             bool status = true;
             ExportBlockToObject();
@@ -1006,6 +1006,10 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         f5Held = false;
     }
 
+    if(escOnFrame && running) {
+        extToggleF5 = !extToggleF5;
+    }
+
     if (running) {
         constexpr double VM_INSTRUCTIONS_PER_SECOND = 5280.0;
 
@@ -1301,6 +1305,17 @@ void FreeplayScene::instantiateLevel(Engine* engine) {
     for(auto& [id, object] : state) {
         // check type
         instantiateObject(engine, object);
+    }
+}
+
+void FreeplayScene::resetLevel(Engine* engine) {
+    // write into level objects from save state
+    const auto& state = levelState.GetLevelObjects();
+    for(auto& [id, object] : state) {
+        if(!object.isInteractive) continue; // skip tiles for reset
+        auto entity = sceneEntities[object.id];
+        // reset runtime data
+        entity->transform = object.transform; // transform
     }
 }
 

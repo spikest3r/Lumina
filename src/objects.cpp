@@ -48,10 +48,11 @@ VMState InteractiveObject::stepVM() {
 bool InteractiveObject::compileCode(std::string& errBuffer) {
     // compile code
     CompilerData data;
-    int status = compile(sourceCode, &data, errBuffer, false, false); // TODO: rid of flags
+    int status = compileFromText(sourceCode, &data);
     if(status != 0) {
         // compilation failed
         std::cout << "Failed to compile\n";
+        errBuffer = getCompilerError();
         return false;
     } else {
         // proceed
