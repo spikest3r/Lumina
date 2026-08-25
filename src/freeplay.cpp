@@ -20,7 +20,8 @@ constexpr float grid = 2.0f;
 constexpr float DEG2RAD = 3.14159265358979323846f / 180.0f;
 constexpr float RAD2DEG = 180.0f / 3.14159265358979323846f;
 
-#define MAX_WORLD_HEIGHT 4
+#define MAX_WORLD_HEIGHT 8
+#define MAX_SCENE_OBJECTS 768
 
 #include "imgui.h"
 
@@ -657,6 +658,15 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
     }
 
+    if(activeBrush) {
+        ToolUI::SetNextWindowPos({0,0});
+        ToolUI::SetNextWindowSize({256,72});
+        ToolUI::Begin("Objects in scene");
+        std::string countText = std::format("{}/{}", totalObjectsInScene, MAX_SCENE_OBJECTS);
+        ToolUI::Text(countText.c_str());        
+        ToolUI::End();
+    }
+
     m_fileManager.Render();
 }
 
@@ -823,17 +833,22 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
                 if(engine->isLastFrame()) {
                     if(!eraseBrush && !occupied && placeBtnPress) {
-                        auto objectTrans = baseTransform;
-                        objectTrans.position = hit;
-                        objectTrans.rotation = rotation;
-                        auto name = getUniqueObjectName();
+                        // check limit first
+                        if(totalObjectsInScene >= MAX_SCENE_OBJECTS) {
+                            std::cout << "LIMIT\n";
+                        } else {
+                            auto objectTrans = baseTransform;
+                            objectTrans.position = hit;
+                            objectTrans.rotation = rotation;
+                            auto name = getUniqueObjectName();
 
-                        LevelObject newObject = {name, name, brushColor, lastBrushName, objectTrans, false, false};
-                        levelState.AddObject(name, newObject);
-                        instantiateObject(engine, newObject);
+                            LevelObject newObject = {name, name, brushColor, lastBrushName, objectTrans, false, false};
+                            levelState.AddObject(name, newObject);
+                            instantiateObject(engine, newObject);
 
-                        Sound* brushPlaceSound = resourceManager->getSound("place", false, true);
-                        brushObject->playSound(brushPlaceSound, 1.0f);
+                            Sound* brushPlaceSound = resourceManager->getSound("place", false, true);
+                            brushObject->playSound(brushPlaceSound, 1.0f);
+                        }
                     } else if(occupied && deleteBtnPress) {
                         auto id = occupiedCells[gp];
                         auto object = sceneObjects[id];
@@ -1080,6 +1095,8 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         autosaveTime = autosaveInterval;
         SaveProject();
     }
+
+    totalObjectsInScene = sceneEntities.size() + sceneObjects.size();
 }
 
 void FreeplayScene::DestroyScene(Engine* engine) {

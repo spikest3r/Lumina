@@ -189,4 +189,6 @@ protected:
 
     float autosaveTime = 0.0f;
     const float autosaveInterval = 60.0f; // save every minute
+
+    int totalObjectsInScene = 0;
 };
