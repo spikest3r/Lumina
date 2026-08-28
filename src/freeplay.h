@@ -10,6 +10,8 @@
 #include "levelstate.h"
 #include "blockeditor/blockeditor.h"
 #include "mainmenu/mainmenu.h"
+#include <engine_tool_ui.h>
+
 
 enum class LoadIntent {
     NO_INTENT, LOAD, NEW, EXIT, SAVEAS
@@ -64,6 +66,8 @@ struct Global {
     Variant variant;
     bool visible = true;
 };
+
+extern UIFont fontDefault;
 
 class FreeplayScene : public Scene {
 public:

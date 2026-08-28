@@ -400,7 +400,7 @@ void FreeplayScene::UICallback(Engine* engine) {
             std::string title = dialog.title + "###dialog_" + std::to_string(i);
             ToolUI::Begin(title.c_str());
             ToolUI::Text(dialog.message.c_str());
-            if(ToolUI::Button("OK")) {
+            if(ToolUI::Button("OK", toolbarButtonSize)) {
                 if(dialog.onClose) {
                     dialog.onClose();
                 }
@@ -423,7 +423,7 @@ void FreeplayScene::UICallback(Engine* engine) {
             ToolUI::Text(dialog.message.c_str());
             std::string id = "##diag_" + dialog.title;
             ToolUI::TextField(id.c_str(), dialog.input, false);
-            if(ToolUI::Button("OK")) {
+            if(ToolUI::Button("OK", toolbarButtonSize)) {
                 if(dialog.onSubmit) {
                     dialog.onSubmit(dialog.input);
                 }
@@ -547,7 +547,10 @@ void FreeplayScene::UICallback(Engine* engine) {
         }
         ToolUI::Separator(HORIZONTAL);
         if(ToolUI::Button("Save", fileMenuButtonSize)) {
-            if(chosenFile) SaveProject();
+            if(chosenFile) {
+                SaveProject();
+                fileMenu = false;
+            }
             else {
                 m_fileManager.Init(FileManager::Mode::SAVE, "", {".lumina"});
                 intent = LoadIntent::SAVEAS;
@@ -594,6 +597,7 @@ void FreeplayScene::UICallback(Engine* engine) {
             ToolUI::SameLine();
             if(ToolUI::Button("Cancel")) {
                 intent = LoadIntent::NO_INTENT;
+                fileMenu = false;
             }
             ToolUI::End();
             if(handle) {
@@ -617,8 +621,10 @@ void FreeplayScene::UICallback(Engine* engine) {
                             instantiateLevel(engine);
                             chosenFile = true;
                             intent = LoadIntent::NO_INTENT;
+                            fileMenu = false;
                         } else if (!m_fileManager.IsOpen() && !m_fileManager.HasResult()) {
                             intent = LoadIntent::NO_INTENT;
+                            fileMenu = false;
                         }
                         break;
                     }
@@ -629,6 +635,7 @@ void FreeplayScene::UICallback(Engine* engine) {
                         codeModeSwitch = levelState.codeMode;
                         constructGameObjects(engine);
                         intent = LoadIntent::NO_INTENT;
+                        fileMenu = false;
                         chosenFile = false;
                         break;
                     }
@@ -641,6 +648,7 @@ void FreeplayScene::UICallback(Engine* engine) {
                             chosenFile = true;
                             if(!nextIntentLoad) {
                                 intent = LoadIntent::NO_INTENT;
+                                fileMenu = false;
                             } else {
                                 nextIntentLoad = false;
                                 intent = LoadIntent::LOAD;
@@ -648,6 +656,7 @@ void FreeplayScene::UICallback(Engine* engine) {
                             }
                         } else if (!m_fileManager.IsOpen() && !m_fileManager.HasResult()) {
                             intent = LoadIntent::NO_INTENT;
+                            fileMenu = false;
                         }
                         break;
                     }
@@ -666,7 +675,7 @@ void FreeplayScene::UICallback(Engine* engine) {
         ToolUI::SetNextWindowSize({256,72});
         ToolUI::Begin("Objects in scene");
         std::string countText = std::format("{}/{}", totalObjectsInScene, MAX_SCENE_OBJECTS);
-        ToolUI::Text(countText.c_str());        
+        ToolUI::Text(countText.c_str()); 
         ToolUI::End();
     }
 

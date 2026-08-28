@@ -99,10 +99,12 @@ inline std::string getTempLabel(int& counter) {
     return "temp_" + std::to_string(counter++);
 }
 
-ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData& data) {
+ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData& data, std::stringstream* altStream = nullptr) {
     if (data.hasError) return {"", ExprType::Unknown};
     const auto& field = parentBlock.fields[fieldID];
     const std::string idStr = std::to_string(fieldID) + "_" + std::to_string(parentBlock.id);
+
+    std::stringstream& stream = altStream ? *altStream : data.ss;
 
     if (field.plugged) {
         auto& pb = *field.plugged;
@@ -124,29 +126,31 @@ ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData&
                     return {"", ExprType::Unknown};
                 }
                 auto str = "tempGlobalRead" + idStr;
-                data.ss << "readGlobal \'" << varName << "\', &" << str << "\n";
-                return {str, ExprType::Unknown};
+                stream << "readGlobal \'" << varName << "\', &" << str << "\n";
+                ExprType vType = ExprType::Unknown;
+                if (data.varTypes.count("g_" + varName)) vType = data.varTypes["g_" + varName];
+                return {str, vType};
             }
             case BlockType::Ask: {
                 auto textRes = getFieldValue(pb, 0, data);
                 if (data.hasError) return {"", ExprType::Unknown};
-                data.ss << "ask " << textRes.code << ", &tempAsk" << idStr << "\n";
+                stream << "ask " << textRes.code << ", &tempAsk" << idStr << "\n";
                 return {"tempAsk" + idStr, ExprType::Unknown};
             }
             case BlockType::IsKeyDown: {
                 auto keyRes = getFieldValue(pb, 0, data);
                 if (data.hasError) return {"", ExprType::Unknown};
-                data.ss << "isKeyDown " << keyRes.code << ", &flagKeyDown" << idStr << "\n";
+                stream << "isKeyDown " << keyRes.code << ", &flagKeyDown" << idStr << "\n";
                 return {"flagKeyDown" + idStr + " == 1", ExprType::Boolean};
             }
             case BlockType::IsObstacleAhead: {
-                data.ss << "isObstacleAhead &flagObstacleAhead" << idStr << "\n";
+                stream << "isObstacleAhead &flagObstacleAhead" << idStr << "\n";
                 return {"flagObstacleAhead" + idStr + " == 1", ExprType::Boolean};
             }
             case BlockType::IsTouching: {
                 auto objRes = getFieldValue(pb, 0, data);
                 if (data.hasError) return {"", ExprType::Unknown};
-                data.ss << "isTouching " << objRes.code << ", &flagIsTouching" << idStr << "\n";
+                stream << "isTouching " << objRes.code << ", &flagIsTouching" << idStr << "\n";
                 return {"flagIsTouching" + idStr + " == 1", ExprType::Boolean};
             }
             case BlockType::RandomRange: {
@@ -157,7 +161,7 @@ ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData&
                     SetError(data, pb.id, "RandomRange requires numbers, got strings.");
                     return {"", ExprType::Unknown};
                 }
-                data.ss << "randomRange " << minRes.code << ", " << maxRes.code << ", &tempRandom" << idStr << "\n";
+                stream << "randomRange " << minRes.code << ", " << maxRes.code << ", &tempRandom" << idStr << "\n";
                 return {"tempRandom" + idStr, ExprType::Numeric};
             }
             case BlockType::MathAdd:
@@ -204,18 +208,18 @@ ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData&
             case BlockType::LogicNot: {
                 auto cond = getFieldValue(pb, 0, data);
                 if (data.hasError) return {"", ExprType::Unknown};
-                data.ss << "if " << cond.code << "\n";
-                data.ss << "flagNot" << idStr << " = 0\n";
-                data.ss << "else\n";
-                data.ss << "flagNot" << idStr << " = 1\n";
-                data.ss << "endif\n";
+                stream << "if " << cond.code << "\n";
+                stream << "flagNot" << idStr << " = 0\n";
+                stream << "else\n";
+                stream << "flagNot" << idStr << " = 1\n";
+                stream << "endif\n";
                 return {"flagNot" + idStr + " == 1", ExprType::Boolean};
             }
             case BlockType::Concat: {
                 auto str1 = getFieldValue(pb, 0, data);
                 auto str2 = getFieldValue(pb, 1, data);
                 if (data.hasError) return {"", ExprType::Unknown};
-                data.ss << "tempConcat" << idStr << " = " << str1.code << " .. " << str2.code << "\n";
+                stream << "tempConcat" << idStr << " = " << str1.code << " .. " << str2.code << "\n";
                 return {"tempConcat" + idStr, ExprType::String};
             }
             default:
@@ -365,8 +369,30 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                 }
                 auto valRes = getFieldValue(b, 1, codeGenData);
                 if (codeGenData.hasError) return;
-                codeGenData.varTypes[name] = valRes.type;
+                codeGenData.varTypes["g_" + name] = valRes.type;
                 ss << "writeGlobal \'" << name << "\', " << valRes.code << "\n";
+                break;
+            }
+        case BlockType::HideGlobal:
+            {
+                auto name = b.fields[0].text; 
+                if (!IsValidVariableName(name)) {
+                    SetError(codeGenData, b.id, "Invalid global name: '" + name + "'");
+                    return;
+                }
+                if (codeGenData.hasError) return;
+                ss << "hideGlobal \'" << name << "\'\n";
+                break;
+            }
+        case BlockType::ShowGlobal:
+            {
+                auto name = b.fields[0].text; 
+                if (!IsValidVariableName(name)) {
+                    SetError(codeGenData, b.id, "Invalid global name: '" + name + "'");
+                    return;
+                }
+                if (codeGenData.hasError) return;
+                ss << "hideGlobal \'" << name << "\'\n";
                 break;
             }
         case BlockType::SayText:
@@ -406,9 +432,12 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
             }
         case BlockType::While:
             {
-                auto condRes = getFieldValue(b, 0, codeGenData);
+                std::stringstream altStream;
+                auto condRes = getFieldValue(b, 0, codeGenData, &altStream);
                 if (codeGenData.hasError) return;
+                ss << "# prefetch\n" << altStream.str();
                 ss << "while " << condRes.code << "\n";
+                ss << altStream.str(); // FIX: duplicated condition fetch below while itself to avoid stale value
                 for(const BlockInfo& childInfo : b.subStacks[0]) {
                     GenerateBlockCode(childInfo, codeGenData);
                     if (codeGenData.hasError) return;

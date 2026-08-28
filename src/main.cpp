@@ -14,6 +14,8 @@ static bool requestLoadFreeplay = false;
 static bool isFreeplay = false;
 static std::string projectToLoad = "";
 
+UIFont fontDefault;
+
 void loadFreeplay() {
     if(isFreeplay || requestLoadFreeplay) return;
     requestLoadFreeplay = true;
@@ -34,6 +36,14 @@ int main() {
     Engine* engine = Engine::Create();
 	engine->init(800, 600, "Lumen Creator");
     engine->setClearColor({0.18f, 0.18f, 0.18f});
+
+    #ifdef _WIN32
+        const char* fontPath = "C:\\Windows\\Fonts\\consola.ttf";
+    #else
+        const char* fontPath = "/usr/share/fonts/TTF/Hack-Regular.ttf";
+    #endif
+
+    // ToolUI::AddFontFromFileTTF(fontDefault, fontPath, 14.0f);
 
     MainMenuScene* mainMenuScene = engine->createScene<MainMenuScene>();
 
