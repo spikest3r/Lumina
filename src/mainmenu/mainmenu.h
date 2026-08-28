@@ -5,7 +5,7 @@
 #include <ui.h>
 
 void loadFreeplay();
-void loadFreeplay(const std::string& projectFile);
+void loadFreeplay(const std::string& projectFile, bool doNotPersist = false);
 void unloadFreeplay();
 
 class MainMenuScene : public Scene {
@@ -20,4 +20,8 @@ protected:
     // logo
     Texture* logoTexture;
     UIElement* logoElement;
+
+    void renderMainMenu();
+    void renderExamples();
+    bool examples = false;
 };

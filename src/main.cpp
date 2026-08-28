@@ -13,6 +13,7 @@ static FreeplayScene* freeplayScene;
 static bool requestLoadFreeplay = false;
 static bool isFreeplay = false;
 static std::string projectToLoad = "";
+static bool justLoad = false;
 
 UIFont fontDefault;
 
@@ -21,10 +22,11 @@ void loadFreeplay() {
     requestLoadFreeplay = true;
 }
 
-void loadFreeplay(const std::string& projectFile) {
+void loadFreeplay(const std::string& projectFile, bool doNotPersist) {
     if(isFreeplay || requestLoadFreeplay) return;
     projectToLoad = projectFile;
     requestLoadFreeplay = true;
+    justLoad = doNotPersist;
 }
 
 void unloadFreeplay() {
@@ -67,8 +69,9 @@ int main() {
 
                 freeplayScene = engine->createScene<FreeplayScene>();
                 if(projectToLoad.size() > 0) {
-                    freeplayScene->setProjectFile(projectToLoad);
+                    freeplayScene->setProjectFile(projectToLoad, justLoad);
                     projectToLoad.clear();
+                    justLoad = false;
                 }
                 engine->loadScene(freeplayScene);
             } else {

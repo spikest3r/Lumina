@@ -288,6 +288,17 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                 ss << "moveForward " << res.code << "\n";
                 break;
             }
+        case BlockType::UpwardForce:
+            {
+                auto res = getFieldValue(b, 0, codeGenData);
+                if (codeGenData.hasError) return;
+                if (res.type == ExprType::String) {
+                    SetError(codeGenData, b.id, "UpwardForce requires a numeric value");
+                    return;
+                }
+                ss << "upwardForce " << res.code << "\n";
+                break;
+            }
         case BlockType::GoToPos:
             {
                 auto x = getFieldValue(b, 0, codeGenData);

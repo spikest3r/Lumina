@@ -66,7 +66,7 @@ struct ParsedBlock {
 
 bool IsKnownBlockTypeValue(uint32_t v) {
     return v >= static_cast<uint32_t>(BlockType::HeadBlock) &&
-           v <= static_cast<uint32_t>(BlockType::ShowGlobal);
+           v <= static_cast<uint32_t>(BlockType::UpwardForce);
 }
 
 bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
@@ -350,6 +350,9 @@ void BlockEditor::InitPalette() {
 
     m_palette.push_back({ BlockType::SetRot, "Set Rotation", IM_COL32(90, 140, 210, 255),
                            { SlotTemplate{ "X", "0", SlotType::Number }, SlotTemplate{ "Y", "0", SlotType::Number }, SlotTemplate{ "Z", "0", SlotType::Number } } });
+
+    m_palette.push_back({ BlockType::UpwardForce, "Upward Force", IM_COL32(90, 140, 210, 255), 
+                            { SlotTemplate{ "force", "0", SlotType::Number}}});
 
     m_palette.push_back({ BlockType::WaitUntilGround, "Wait Until Ground", IM_COL32(90, 140, 210, 255), { } });
     

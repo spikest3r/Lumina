@@ -99,7 +99,8 @@ std::unordered_map<std::string, Function> funcList = {
     {"writeGlobal", {0xC0, 2}},
     {"readGlobal", {0xC1, 2}},
     {"hideGlobal", {0xC2, 1}},
-    {"showGlobal", {0xC3, 1}}
+    {"showGlobal", {0xC3, 1}},
+    {"upwardForce", {0xC4, 1}}
 };
 
 static std::string errorBuffer;

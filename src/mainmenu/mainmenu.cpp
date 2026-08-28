@@ -18,6 +18,8 @@ void MainMenuScene::InitScene(Engine* engine) {
 
     logoTexture = engine->createTexture("logoTex", "assets/textures/logo.png");
     logoElement = engine->createUIElement(logoTexture, {0,0}, {704,384});
+
+    examples = false;
 }
 
 void MainMenuScene::DestroyScene(Engine* engine) {
@@ -41,11 +43,21 @@ void MainMenuScene::UpdateScene(Engine* engine) {
 
 void MainMenuScene::UICallback(Engine* engine) {
     Vector2 extents = engine->getExtents();
-    ToolUI::SetNextWindowSize({300,100});
+    ToolUI::SetNextWindowSize({300,150});
     ToolUI::SetNextWindowPos({extents.x / 2 - 150, extents.y / 2 + 100});
+    if(examples) renderExamples();
+    else renderMainMenu();
+
+    m_fileManager.Render();
+}
+
+void MainMenuScene::renderMainMenu() {
     ToolUI::Begin("Main menu", false, false);
     if(ToolUI::Button("New project")) {
         loadFreeplay();
+    }
+    if(ToolUI::Button("Examples")) {
+        examples = true;
     }
     if(ToolUI::Button("Load existing project")) {
         m_fileManager.Init(FileManager::Mode::OPEN, "", {".lumina"});
@@ -57,6 +69,15 @@ void MainMenuScene::UICallback(Engine* engine) {
         }
     }
     ToolUI::End();
+}
 
-    m_fileManager.Render();
+void MainMenuScene::renderExamples() {
+    ToolUI::Begin("Examples", false, false);
+    if(ToolUI::Button("< Back")) {
+        examples = false;
+    }
+    if(ToolUI::Button("Collect & Avoid")) {
+        loadFreeplay("examples/collector.lumina", true);
+    }
+    ToolUI::End();
 }

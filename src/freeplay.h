@@ -76,7 +76,7 @@ public:
     void runtimeDestroyInteractive(InteractiveObject* object);
     void stopExecution();
 
-    void setProjectFile(const std::string& file);
+    void setProjectFile(const std::string& file, bool doNotPersist = false);
     std::unordered_map<std::string, Global> sceneGlobals;
 protected:
     ResourceManager* resourceManager;
@@ -88,6 +88,7 @@ protected:
     std::string projectFile = "";
     bool chosenFile = false;
     bool dropFile = false;
+    bool justLoad = false;
 
     GameObject* sfxHandler;
 

@@ -599,4 +599,9 @@ std::unordered_map<int, NativeFn> funcMap = {
         vm.stack.pop_back();
         vm.self->scene->sceneGlobals[name].visible = true;
     }},
+    {0xC4, [](VMExecutionData& vm) {
+        // upwardForce force
+        float force = getNumeric(vm.stack.back()); vm.stack.pop_back();
+        vm.self->verticalVelocity += force;
+    }},
 };

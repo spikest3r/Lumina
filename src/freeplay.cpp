@@ -71,38 +71,40 @@ void ComputeOrbitCamera(Vector3 currentPosition,
     outRotation.z = 0.0f;
 }
 
-void ApplyFakeGravity(GameObject* obj, Engine* engine, float dt, float fallSpeed = 9.8f, float groundOffset = 0.05f, float objectOffset = 0.0f)
+void ApplyFakeGravity(InteractiveObject* obj, Engine* engine, float dt, float fallSpeed = 9.8f, float groundOffset = 0.05f, float objectOffset = 0.0f)
 {
+    // fallSpeed is gravitational acceleration; verticalVelocity persists across frames so
+    // UpwardForce can add to it and have gravity pull it back down naturally.
+    obj->verticalVelocity -= fallSpeed * dt;
+
     Vector3 pos = obj->transform.position;
     Vector3 down = { 0.0f, 0.0f, -1.0f };
 
     RaycastHit hit = engine->raycast(pos, down, 100.0f);
 
+    float newZ = pos.z + obj->verticalVelocity * dt;
+
     if (hit.object != nullptr)
     {
         float groundZ = pos.z - hit.distance;
-        float distToGround = pos.z - groundZ;
-
         const auto offset = groundOffset + objectOffset;
+        float groundedZ = groundZ + offset;
 
-        if (distToGround > offset)
+        if (newZ <= groundedZ && obj->verticalVelocity <= 0.0f)
         {
-            float fallStep = fallSpeed * dt;
-
-            if (fallStep > distToGround - offset)
-                fallStep = distToGround - offset;
-
-            obj->transform.position.z -= fallStep;
+            // Landed (or resting): clamp downward velocity so it doesn't accumulate while grounded.
+            obj->transform.position.z = groundedZ;
+            obj->verticalVelocity = 0.0f;
         }
         else
         {
-            obj->transform.position.z = groundZ + offset;
+            obj->transform.position.z = newZ;
         }
     }
     else
     {
         // No ground found — keep falling
-        obj->transform.position.z -= fallSpeed * dt;
+        obj->transform.position.z = newZ;
     }
 }
 
@@ -132,6 +134,7 @@ void FreeplayScene::InitScene(Engine* engine) {
         chosenFile = false;
     } else {
         std::cout << "Instantiating with existing project file\n";
+        if(justLoad) std::cout << "justLoad flag\n";
         levelState.Load(projectFile);
         codeModeSwitch = levelState.codeMode;
         instantiateLevel(engine);
@@ -141,7 +144,7 @@ void FreeplayScene::InitScene(Engine* engine) {
             showDialog("Previous session", "Your previous session has been auto-saved.\nDon't forget to save your projects!", nullptr);
             chosenFile = false;
             levelState.SetModified();
-        } else {
+        } else if(!justLoad) {
             chosenFile = true;
         }
     }
@@ -1489,7 +1492,8 @@ void FreeplayScene::SaveProject() {
     levelState.Save(projectFile);
 }
 
-void FreeplayScene::setProjectFile(const std::string& file) {
+void FreeplayScene::setProjectFile(const std::string& file, bool doNotPersist) {
     loadNew = false;
     projectFile = file;
+    justLoad = doNotPersist;
 }

@@ -45,6 +45,7 @@ public:
     bool execLock = false;
 
     bool gravity = false;
+    float verticalVelocity = 0.0f;
     ExecutionType execType;
 
     bool isTouching(std::string name);

@@ -51,7 +51,8 @@ enum class BlockType {
     SetGlobal,
     GetGlobal,
     HideGlobal,
-    ShowGlobal
+    ShowGlobal,
+    UpwardForce
 };
 
 inline bool IsSlotOnlyBlockType(BlockType type) {
