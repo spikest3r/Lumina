@@ -33,12 +33,22 @@ struct LevelStateHeader {
     uint32_t version;
     int objectCounter;
     bool codeMode = false;
+    // v2
+    bool cameraFollow = false;
+    std::string followObject = "Object0";
+    bool rotationAllowed = true;
+    Vector3 defaultRotation = {0.0f, 0.0f, 0.0f};
 };
 
 class LevelState {
 public:
     int objectCounter = 0;
     bool codeMode = false;
+    // v2
+    bool cameraFollow = false;
+    std::string followObject = "Object0"; // for camera follow, unique id only, default is player (its unique id is always Object0)
+    bool rotationAllowed = true;
+    Vector3 defaultRotation = {0.0f, 0.0f, 0.0f};
 
     void Save(const std::string& path);
     void Load(const std::string& path);

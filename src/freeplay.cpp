@@ -175,7 +175,7 @@ void FreeplayScene::UICallback(Engine* engine) {
     ToolUI::SameLine();
     ToolUI::Separator(VERTICAL);
     ToolUI::SameLine();
-    if(ToolUI::Button(running ? "Stop" : "Run", toolbarButtonSize) || extToggleF5) {
+    if(ToolUI::Button(running ? "Stop (F5)" : "Run (F5)", toolbarButtonSize) || extToggleF5) {
         extToggleF5 = false;
         if(running) {
             cameraMode = false;
@@ -192,42 +192,57 @@ void FreeplayScene::UICallback(Engine* engine) {
             sceneGlobals.clear();
         } else {
             bool status = true;
-            ExportBlockToObject();
-            for(auto& object: objects) {
-                if(!levelState.codeMode) {
-                    // code gen from blocks
-                    uint64_t errorBlockId = 0;
-                    std::string errorMsg;
-                    auto sc = GenerateCode(object->blockData, &errorMsg, &errorBlockId);
-                    if(sc) {
-                        object->sourceCode = sc.value();
-                    } else {
-                        m_blockEditor.SetErrorBlock(errorBlockId);
-                        showDialog("Error in block", errorMsg, nullptr);
-                        status = false;
+            // firstly verify correct camera follow object
+            if(levelState.cameraFollow) {
+                auto it = sceneEntities.find(levelState.followObject);
+                if(it == sceneEntities.end()) {
+                    showDialog("Error (Settings)", "Invalid camera target! Make sure specified Unique ID is valid and references entity (tiles are not valid targets).", nullptr);
+                    status = false;
+                }
+            }
+            if(status) {
+                // then proceed with compilation and execution setup
+                ExportBlockToObject();
+                for(auto& object: objects) {
+                    if(!levelState.codeMode) {
+                        // code gen from blocks
+                        uint64_t errorBlockId = 0;
+                        std::string errorMsg;
+                        auto sc = GenerateCode(object->blockData, &errorMsg, &errorBlockId);
+                        if(sc) {
+                            object->sourceCode = sc.value();
+                        } else {
+                            m_blockEditor.SetErrorBlock(errorBlockId);
+                            showDialog("Error in block", errorMsg, nullptr);
+                            status = false;
+                            break;
+                        }
+                    }
+                    std::string message;
+                    status = object->compileCode(message);
+                    if(!status) {
+                        // TODO: for block mode pinpoint bad block
+                        showDialog("Compilation error", message, nullptr);
                         break;
                     }
+                    if(object->execType == ExecutionType::ONCLICK) {
+                        object->execLock = true;
+                    }
+                    object->resetVM();
                 }
-                std::string message;
-                status = object->compileCode(message);
-                if(!status) {
-                    // TODO: for block mode pinpoint bad block
-                    showDialog("Compilation error", message, nullptr);
-                    break;
-                }
-                if(object->execType == ExecutionType::ONCLICK) {
-                    object->execLock = true;
-                }
-                object->resetVM();
-            }
 
-            if(status) {
-                closePropertiesPanel();
-                setToolbarActive(false);
-                objectCount = objects.size();
-                haltedObjects = 0;
-                running = true;
-                cameraMode = true;
+                if(status) {
+                    cameraPitch = levelState.defaultRotation.x;
+                    cameraYaw = levelState.defaultRotation.y;
+                    ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
+
+                    closePropertiesPanel();
+                    setToolbarActive(false);
+                    objectCount = objects.size();
+                    haltedObjects = 0;
+                    running = true;
+                    cameraMode = true;
+                }
             }
         }
     }
@@ -442,6 +457,17 @@ void FreeplayScene::UICallback(Engine* engine) {
 
     if(settingsPanel && toolbarActive && !running) {
         ToolUI::Begin("Settings");
+        ToolUI::Text("Camera settings");
+        ToolUI::Checkbox("Camera follow", &levelState.cameraFollow);
+        if(levelState.cameraFollow) {
+            ToolUI::TextField("Object to follow (Unique ID)", levelState.followObject, true);
+        }
+        ToolUI::Checkbox("Allow rotation?", &levelState.rotationAllowed);
+        ToolUI::InputFloat3("Default rotation", levelState.defaultRotation);
+        if(ToolUI::Button("Copy")) {
+            levelState.defaultRotation = 
+                engine->cameraRotation;
+        }
         ToolUI::Text("Coding environment");
         if(ToolUI::RadioButtonInt("Blocks", &codeModeSwitch, 0)) {
             codeModeSwitch = 1;
@@ -933,7 +959,7 @@ void FreeplayScene::UpdateScene(Engine* engine) {
         bool heldRight = engine->getMouseButton(MouseButton::Left) == PRESS;
 
         // orbit
-        if (heldLeft && !heldRight)
+        if (heldLeft && !heldRight && (!running || levelState.rotationAllowed))
         {
             Vector2 mousePos = engine->getMousePos();
 
@@ -1137,6 +1163,14 @@ void FreeplayScene::UpdateScene(Engine* engine) {
     if(autosaveTime <= 0.0f) {
         autosaveTime = autosaveInterval;
         SaveProject();
+    }
+
+    // camera follow system
+    if(running && levelState.cameraFollow) {
+        // verified before, skip find()
+        auto object = sceneEntities[levelState.followObject];
+        cameraTarget = object->transform.position;
+        ComputeOrbitCamera(cameraTarget, cameraYaw, cameraPitch, cameraDist, engine->cameraPosition, engine->cameraRotation);
     }
 
     totalObjectsInScene = sceneEntities.size() + sceneObjects.size();
