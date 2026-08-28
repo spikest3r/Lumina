@@ -425,8 +425,21 @@ std::unordered_map<int, NativeFn> funcMap = {
         vm.variables[ptr].data = (int)colliding;
     }},
     {0xB5, [](VMExecutionData& vm) {
-        // TODO: reserved for future use
-        throw std::runtime_error("Opcode 0xB5 is not implemented.");
+        // setOtherPos x, y, z, 'object'
+        std::string objectName = std::get<std::string>(vm.stack.back().data);
+        vm.stack.pop_back();
+        GameObject* obj = vm.self->engPtr->getGameObject(objectName);
+        // TODO/FIXME: optimize this, dynamic cast every frame is bad!!
+        if(obj && dynamic_cast<InteractiveObject*>(obj)) {
+            // move only interactive objects, tiles should stay fixed position
+            Vector3* pos = &obj->transform.position;
+            pos->z = getNumeric(vm.stack.back());
+            vm.stack.pop_back();
+            pos->y = getNumeric(vm.stack.back());
+            vm.stack.pop_back();
+            pos->x = getNumeric(vm.stack.back());
+            vm.stack.pop_back();
+        }
     }},
     {0xB6, [](VMExecutionData& vm) {
         // dynamic type
@@ -557,5 +570,33 @@ std::unordered_map<int, NativeFn> funcMap = {
         // stopAll - stops level execution
         vm.suspended = true;
         vm.self->scene->stopExecution();
-    }}
+    }},
+    {0xC0, [](VMExecutionData& vm) {
+        // writeGlobal 'name', value
+        auto value = vm.stack.back();
+        vm.stack.pop_back();
+        auto name = std::get<std::string>(vm.stack.back().data);
+        vm.stack.pop_back();
+        vm.self->scene->sceneGlobals[name].variant = value;
+    }},
+    {0xC1, [](VMExecutionData& vm) {
+        // readGlobal 'name', &value
+        auto varIndex = getInt(vm.stack.back());
+        vm.stack.pop_back();
+        auto name = std::get<std::string>(vm.stack.back().data);
+        vm.stack.pop_back();
+        vm.variables[varIndex] = vm.self->scene->sceneGlobals[name].variant;
+    }},
+    {0xC2, [](VMExecutionData& vm) {
+        // hideGlobal 'name'
+        auto name = std::get<std::string>(vm.stack.back().data);
+        vm.stack.pop_back();
+        vm.self->scene->sceneGlobals[name].visible = false;
+    }},
+    {0xC3, [](VMExecutionData& vm) {
+        // showGlobal 'name'
+        auto name = std::get<std::string>(vm.stack.back().data);
+        vm.stack.pop_back();
+        vm.self->scene->sceneGlobals[name].visible = true;
+    }},
 };

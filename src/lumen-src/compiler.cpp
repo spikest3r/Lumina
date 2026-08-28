@@ -85,7 +85,7 @@ std::unordered_map<std::string, Function> funcList = {
     {"setPos", {0xB2, 3}},
     {"setRot", {0xB3, 3}},
     {"isTouching", {0xB4, 2}},
-    // {"askInt", {0xB5, 2}},
+    {"setOtherPos", {0xB5, 4}},
     {"ask", {0xB6, 2}},
     {"getPos", {0xB7, 3}},
     {"isKeyDown", {0xB8, 2}},
@@ -96,6 +96,10 @@ std::unordered_map<std::string, Function> funcList = {
     {"destroySelf", {0xBD, 0}},
     // {"destroy", {0xBE, 0}},
     {"stopAll", {0xBF, 0}},
+    {"writeGlobal", {0xC0, 2}},
+    {"readGlobal", {0xC1, 2}},
+    {"hideGlobal", {0xC2, 1}},
+    {"showGlobal", {0xC3, 1}}
 };
 
 static std::string errorBuffer;

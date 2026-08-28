@@ -60,6 +60,11 @@ struct GridPosHash
     }
 };
 
+struct Global {
+    Variant variant;
+    bool visible = true;
+};
+
 class FreeplayScene : public Scene {
 public:
     void showDialog(const std::string& title, const std::string& message, std::function<void()> onClose);
@@ -68,6 +73,7 @@ public:
     void stopExecution();
 
     void setProjectFile(const std::string& file);
+    std::unordered_map<std::string, Global> sceneGlobals;
 protected:
     ResourceManager* resourceManager;
     LevelState levelState;

@@ -66,13 +66,14 @@ struct ParsedBlock {
 
 bool IsKnownBlockTypeValue(uint32_t v) {
     return v >= static_cast<uint32_t>(BlockType::HeadBlock) &&
-           v <= static_cast<uint32_t>(BlockType::EndRoutine);
+           v <= static_cast<uint32_t>(BlockType::ShowGlobal);
 }
 
 bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
     if (slotType == SlotType::Any) return true;
     
     bool isNumberSource = (blockType == BlockType::Variable ||
+                           blockType == BlockType::GetGlobal ||
                            blockType == BlockType::Ask ||
                            blockType == BlockType::MathAdd ||
                            blockType == BlockType::MathSub ||
@@ -81,6 +82,7 @@ bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
                            blockType == BlockType::RandomRange);
                            
     bool isTextSource = (blockType == BlockType::Variable ||
+                         blockType == BlockType::GetGlobal ||
                          blockType == BlockType::Ask ||
                          blockType == BlockType::Concat);
                          
@@ -331,6 +333,21 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::GoToPos, "Go to Position", IM_COL32(90, 140, 210, 255),
                            { SlotTemplate{ "X", "0", SlotType::Number }, SlotTemplate{ "Y", "0", SlotType::Number } } });
 
+    m_palette.push_back({ BlockType::SetPos, "Set Own Position", IM_COL32(90, 140, 210, 255),
+                           { SlotTemplate{ "X", "0", SlotType::Number }, SlotTemplate{ "Y", "0", SlotType::Number }, SlotTemplate{ "Z", "0", SlotType::Number } } });
+    
+    m_palette.push_back({
+        BlockType::SetOtherPos,
+        "Set Object Position",
+        IM_COL32(90, 140, 210, 255),
+        {
+            SlotTemplate{ "X", "0", SlotType::Number },
+            SlotTemplate{ "Y", "0", SlotType::Number },
+            SlotTemplate{ "Z", "0", SlotType::Number },
+            SlotTemplate{ "name", "object", SlotType::Text }
+        }
+    });
+
     m_palette.push_back({ BlockType::SetRot, "Set Rotation", IM_COL32(90, 140, 210, 255),
                            { SlotTemplate{ "X", "0", SlotType::Number }, SlotTemplate{ "Y", "0", SlotType::Number }, SlotTemplate{ "Z", "0", SlotType::Number } } });
 
@@ -350,6 +367,18 @@ void BlockEditor::InitPalette() {
 
     m_palette.push_back({ BlockType::Variable, "Variable", IM_COL32(150, 100, 200, 255),
                            { SlotTemplate{ "name", "myVar", SlotType::Text } } });
+
+    m_palette.push_back({ BlockType::SetGlobal, "Set Global", IM_COL32(220, 100, 200, 255),
+                           { SlotTemplate{ "name", "myGlobal", SlotType::Text }, SlotTemplate{ "value", "0", SlotType::TextOrNumber } } });
+
+    m_palette.push_back({ BlockType::GetGlobal, "Global", IM_COL32(220, 100, 200, 255),
+                           { SlotTemplate{ "name", "myGlobal", SlotType::Text } } });
+
+    m_palette.push_back({ BlockType::HideGlobal, "Hide Global", IM_COL32(220, 100, 200, 255),
+                           { SlotTemplate{ "name", "myGlobal", SlotType::Text } } });
+
+    m_palette.push_back({ BlockType::ShowGlobal, "Show Global", IM_COL32(220, 100, 200, 255),
+                           { SlotTemplate{ "name", "myGlobal", SlotType::Text } } });
 
     m_palette.push_back({ BlockType::DestroySelf, "Destroy Self", IM_COL32(200, 90, 90, 255), { } });
     m_palette.push_back({ BlockType::StopAll, "Stop All", IM_COL32(200, 90, 90, 255), { } });

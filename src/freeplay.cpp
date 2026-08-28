@@ -184,6 +184,9 @@ void FreeplayScene::UICallback(Engine* engine) {
             inputDialogs.clear();
             // reinstantiate original state
             resetLevel(engine);
+
+            // rest cleanup
+            sceneGlobals.clear();
         } else {
             bool status = true;
             ExportBlockToObject();
@@ -664,6 +667,34 @@ void FreeplayScene::UICallback(Engine* engine) {
         ToolUI::Begin("Objects in scene");
         std::string countText = std::format("{}/{}", totalObjectsInScene, MAX_SCENE_OBJECTS);
         ToolUI::Text(countText.c_str());        
+        ToolUI::End();
+    }
+
+    if(running && sceneGlobals.size() > 0) {
+        ToolUI::Begin("Globals");
+        for(const auto& [name, data]: sceneGlobals) {
+            if(!data.visible) continue;
+            std::string value;
+            switch (data.variant.type) {
+                case TAG_INT: {
+                    value = std::format("{}", std::get<int64_t>(data.variant.data));
+                    break;
+                }
+                case TAG_FLOAT: {
+                    value = std::format("{}", std::get<double>(data.variant.data));
+                    break;
+                }
+                case TAG_STRING: {
+                    value = std::get<std::string>(data.variant.data);
+                    break;
+                }
+                default:
+                    value = "";
+                    break;
+            }
+            std::string text = std::format("{}: {}", name, value);
+            ToolUI::Text(text.c_str());
+        }
         ToolUI::End();
     }
 

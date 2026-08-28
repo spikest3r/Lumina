@@ -117,6 +117,16 @@ ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData&
                 if (data.varTypes.count(varName)) vType = data.varTypes[varName];
                 return {varName, vType};
             }
+            case BlockType::GetGlobal: {
+                auto varName = pb.fields[0].text;
+                if (!IsValidVariableName(varName)) {
+                    SetError(data, pb.id, "Invalid global name: '" + varName + "'");
+                    return {"", ExprType::Unknown};
+                }
+                auto str = "tempGlobalRead" + idStr;
+                data.ss << "readGlobal \'" << varName << "\', &" << str << "\n";
+                return {str, ExprType::Unknown};
+            }
             case BlockType::Ask: {
                 auto textRes = getFieldValue(pb, 0, data);
                 if (data.hasError) return {"", ExprType::Unknown};
@@ -286,6 +296,35 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                 ss << "goToPos " << x.code << ", " << y.code << "\n";
                 break;
             }
+        case BlockType::SetPos:
+            {
+                // setting own position
+                auto x = getFieldValue(b, 0, codeGenData);
+                auto y = getFieldValue(b, 1, codeGenData);
+                auto z = getFieldValue(b, 2, codeGenData);
+                if (codeGenData.hasError) return;
+                if (x.type == ExprType::String || y.type == ExprType::String || z.type == ExprType::String) {
+                    SetError(codeGenData, b.id, "SetPos requires numeric coordinates");
+                    return;
+                }
+                ss << "setPos " << x.code << ", " << y.code << ", " << z.code << "\n";
+                break;
+            }
+        case BlockType::SetOtherPos:
+            {
+                // setting other object position
+                auto x = getFieldValue(b, 0, codeGenData);
+                auto y = getFieldValue(b, 1, codeGenData);
+                auto z = getFieldValue(b, 2, codeGenData);
+                auto object = getFieldValue(b, 3, codeGenData);
+                if (codeGenData.hasError) return;
+                if (x.type == ExprType::String || y.type == ExprType::String || z.type == ExprType::String) {
+                    SetError(codeGenData, b.id, "SetPos requires numeric coordinates");
+                    return;
+                }
+                ss << "setOtherPos " << x.code << ", " << y.code << ", " << z.code << ", " << object.code << "\n";
+                break;
+            }
         case BlockType::SetRot:
             {
                 auto x = getFieldValue(b, 0, codeGenData);
@@ -315,6 +354,19 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                 if (codeGenData.hasError) return;
                 codeGenData.varTypes[name] = valRes.type;
                 ss << name << " = " << valRes.code << "\n";
+                break;
+            }
+        case BlockType::SetGlobal:
+            {
+                auto name = b.fields[0].text; 
+                if (!IsValidVariableName(name)) {
+                    SetError(codeGenData, b.id, "Invalid global name: '" + name + "'");
+                    return;
+                }
+                auto valRes = getFieldValue(b, 1, codeGenData);
+                if (codeGenData.hasError) return;
+                codeGenData.varTypes[name] = valRes.type;
+                ss << "writeGlobal \'" << name << "\', " << valRes.code << "\n";
                 break;
             }
         case BlockType::SayText:

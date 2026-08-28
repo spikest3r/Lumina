@@ -24,6 +24,8 @@ enum class BlockType {
     IsKeyDown,
     IsObstacleAhead,
     GoToPos,
+    SetPos,
+    SetOtherPos,
     SetRot,
     Variable,
     If,
@@ -45,11 +47,16 @@ enum class BlockType {
     Concat,
     HeadRoutine,
     ExecuteRoutine,
-    EndRoutine
+    EndRoutine,
+    SetGlobal,
+    GetGlobal,
+    HideGlobal,
+    ShowGlobal
 };
 
 inline bool IsSlotOnlyBlockType(BlockType type) {
     return type == BlockType::Variable ||
+           type == BlockType::GetGlobal ||
            type == BlockType::MathAdd ||
            type == BlockType::MathSub ||
            type == BlockType::MathMul ||
