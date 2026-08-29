@@ -23,5 +23,8 @@ protected:
 
     void renderMainMenu();
     void renderExamples();
+    void renderAbout();
+    
     bool examples = false;
+    bool about = false;
 };

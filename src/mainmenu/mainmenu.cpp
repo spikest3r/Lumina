@@ -43,9 +43,10 @@ void MainMenuScene::UpdateScene(Engine* engine) {
 
 void MainMenuScene::UICallback(Engine* engine) {
     Vector2 extents = engine->getExtents();
-    ToolUI::SetNextWindowSize({300,150});
-    ToolUI::SetNextWindowPos({extents.x / 2 - 150, extents.y / 2 + 100});
+    ToolUI::SetNextWindowSize({500,150});
+    ToolUI::SetNextWindowPos({extents.x / 2 - 250, extents.y / 2 + 100});
     if(examples) renderExamples();
+    else if(about) renderAbout();
     else renderMainMenu();
 
     m_fileManager.Render();
@@ -67,6 +68,9 @@ void MainMenuScene::renderMainMenu() {
             std::string text = static_cast<const std::stringstream&>(std::stringstream() << std::ifstream("last").rdbuf()).str();
             loadFreeplay(text);
         }
+    }
+    if(ToolUI::Button("About")) {
+        about = true;
     }
     ToolUI::End();
 }
@@ -91,5 +95,56 @@ void MainMenuScene::renderExamples() {
     if(ToolUI::Button("Camera-Relative Movement")) {
         loadFreeplay("examples/template_camera_movement.lumina", true);
     }
+    ToolUI::End();
+}
+
+void OpenURL(const std::string& url) {
+#ifdef _WIN32
+	ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
+#else
+	system(("xdg-open " + url).c_str());
+#endif
+}
+
+inline void Link(const char* linkTitle, const char* link, bool sameline = true) {
+	ToolUI::Text(linkTitle);
+	if(sameline) ToolUI::SameLine();
+	if (ToolUI::Button(link)) {
+		OpenURL(link);
+	}
+}
+
+void MainMenuScene::renderAbout() {
+    ToolUI::Begin("About");
+
+    if(ToolUI::Button("< Back")) {
+        about = false;
+    }
+
+    ToolUI::Text("Lumina");
+    ToolUI::Text("Visual programming environment");
+    ToolUI::Text("A game creation environment for everyone.");
+
+    ToolUI::Separator(HORIZONTAL);
+
+    ToolUI::Text("Version 1.0.0");
+    ToolUI::Text("Created by spikest3r");
+
+    Link("GitHub", "https://github.com/spikest3r/Lumina");
+
+    ToolUI::Separator(HORIZONTAL);
+
+    ToolUI::Text("LumenLang v3.2");
+    Link("Github", "https://github.com/spikest3r/LumenLang");
+
+    ToolUI::Separator(HORIZONTAL);
+
+    ToolUI::Text("Proudly powered by VulkanEngine");
+    Link("Github", "https://github.com/spikest3r/VulkanEngine");
+
+    ToolUI::Separator(HORIZONTAL);
+
+    Link("Learn more about me", "https://olehsheremeta.com/");
+
     ToolUI::End();
 }

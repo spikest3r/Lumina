@@ -34,9 +34,24 @@ void unloadFreeplay() {
     requestLoadFreeplay = true;
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    // pre-launch flags
+    bool launchLast = false;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--last") {
+            if(fs::exists("last")) {
+                launchLast = true;
+                std::string text = static_cast<const std::stringstream&>(std::stringstream() << std::ifstream("last").rdbuf()).str();
+                loadFreeplay(text);
+            } else {
+                std::cout << "Last project is not present!\n";
+            }
+        }
+    }
+
     Engine* engine = Engine::Create();
-	engine->init(800, 600, "Lumen Creator");
+	engine->init(800, 600, "Lumina v1.0");
     engine->setClearColor({0.18f, 0.18f, 0.18f});
 
     #ifdef _WIN32
@@ -50,10 +65,12 @@ int main() {
     MainMenuScene* mainMenuScene = engine->createScene<MainMenuScene>();
 
     // check if temporary file exists
-    if(fs::exists("temporary.lumina")) {
-        loadFreeplay("temporary.lumina");
-    } else {
-        engine->loadScene(mainMenuScene);
+    if(!launchLast) {
+        if(fs::exists("temporary.lumina")) {
+            loadFreeplay("temporary.lumina");
+        } else {
+            engine->loadScene(mainMenuScene);
+        }
     }
     
     while (engine->running()) {
