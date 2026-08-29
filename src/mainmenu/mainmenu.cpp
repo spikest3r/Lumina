@@ -1,4 +1,5 @@
 #include "mainmenu.h"
+#include "helpers.h"
 #include <engine_tool_ui.h>
 
 #include <filesystem>
@@ -14,7 +15,7 @@ void MainMenuScene::InitScene(Engine* engine) {
         this->UICallback(engine);
     });
 
-    lastExists = fs::exists("last");
+    lastExists = fs::exists(getLastProjectPath());
 
     logoTexture = engine->createTexture("logoTex", "assets/textures/logo.png");
     logoElement = engine->createUIElement(logoTexture, {0,0}, {704,384});
@@ -65,7 +66,7 @@ void MainMenuScene::renderMainMenu() {
     }
     if(lastExists) {
         if(ToolUI::Button("Load last project")) {
-            std::string text = static_cast<const std::stringstream&>(std::stringstream() << std::ifstream("last").rdbuf()).str();
+            std::string text = static_cast<const std::stringstream&>(std::stringstream() << std::ifstream(getLastProjectPath()).rdbuf()).str();
             loadFreeplay(text);
         }
     }
