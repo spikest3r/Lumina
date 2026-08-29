@@ -91,6 +91,7 @@ std::unordered_map<std::string, Function> funcList = {
     {"isKeyDown", {0xB8, 2}},
     {"setPosXY", {0xB9, 2}},
     {"isObstacleAhead", {0xBA, 1}},
+    {"isObstacleInDirection", {0xC8, 2}},
     {"moveForward", {0xBB, 1}},
     {"waitMs", {0xBC, 1}},
     {"destroySelf", {0xBD, 0}},
@@ -100,7 +101,10 @@ std::unordered_map<std::string, Function> funcList = {
     {"readGlobal", {0xC1, 2}},
     {"hideGlobal", {0xC2, 1}},
     {"showGlobal", {0xC3, 1}},
-    {"upwardForce", {0xC4, 1}}
+    {"upwardForce", {0xC4, 1}},
+    {"isGrounded", {0xC5, 1}},
+    {"moveCameraRelative", {0xC6, 2}},
+    {"setPuppetZRotationFromCamera", {0xC7, 0}}
 };
 
 static std::string errorBuffer;
@@ -219,7 +223,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "label") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 1", lineIndex);
                     return -1;
                 }
                 op = LABEL;
@@ -227,7 +231,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "jump") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 2", lineIndex);
                     return -1;
                 }
                 op = JUMP;
@@ -235,7 +239,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "if") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 3", lineIndex);
                     return -1;
                 }
                 op = IF;
@@ -312,7 +316,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "while") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 4", lineIndex);
                     return -1;
                 }
                 op = WHILE;
@@ -339,7 +343,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "repeat") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 5", lineIndex);
                     return -1;
                 }
                 op = REPEAT;
@@ -366,7 +370,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "halt") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 6", lineIndex);
                     return -1;
                 }
                 bytecode.push_back(0xFF);
@@ -396,7 +400,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "routine") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 7", lineIndex);
                     return -1;
                 }
                 op = SUBROUTINE;
@@ -409,7 +413,7 @@ int compileFromStream(std::istream& input,
             }
             else if (token == "endroutine") {
                 if (op != NONE) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 8", lineIndex);
                     return -1;
                 }
                 if (!inRoutine) {
@@ -586,7 +590,7 @@ int compileFromStream(std::istream& input,
                 auto it = condOpMap.find(keyword);
                 if (it != condOpMap.end()) {
                     if (condOp != COP_NONE || conditionTokens.size() == 0) {
-                        printError("Syntax error", lineIndex);
+                        printError("Syntax error 9", lineIndex);
                         return -1;
                     } 
 
@@ -608,7 +612,7 @@ int compileFromStream(std::istream& input,
                 }
                 else {
                     if (conditionArgs > 1 && condOp != COP_NONE) {
-                        printError("Syntax error", lineIndex);
+                        printError("Syntax error 10", lineIndex);
                         return -1;
                     }
                     conditionTokens += token;
@@ -652,7 +656,7 @@ int compileFromStream(std::istream& input,
         case IF:
         {
             if (conditionTokens.size() == 0) {
-                printError("Syntax error", lineIndex);
+                printError("Syntax error 11", lineIndex);
                 return -1;
             }
 
@@ -672,7 +676,7 @@ int compileFromStream(std::istream& input,
             auto it = condOpcodeMap.find(condOp);
             if (it != condOpcodeMap.end()) {
                 if (conditionArgs != 2) {
-                    printError("Syntax error", lineIndex);
+                    printError("Syntax error 12", lineIndex);
                     return -1;
                 }
                 bytecode.push_back(it->second); // IF32 opcode
@@ -688,7 +692,7 @@ int compileFromStream(std::istream& input,
                 }
             }
             else {
-                printError("Syntax error", lineIndex);
+                printError("Syntax error 13", lineIndex);
                 return -1;
             }
         }
@@ -697,6 +701,7 @@ int compileFromStream(std::istream& input,
         op = NONE;
 
         lineIndex++;
+        conditionTokens.clear();
     }
 
     // Appending HALT instruction to main bytecode

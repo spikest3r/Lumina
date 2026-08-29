@@ -52,7 +52,12 @@ enum class BlockType {
     GetGlobal,
     HideGlobal,
     ShowGlobal,
-    UpwardForce
+    UpwardForce,
+    IsGrounded,
+    MoveCameraRelative,
+    SetPuppetZRotationFromCamera,
+    IsObstacleInDirection,
+    Comment
 };
 
 inline bool IsSlotOnlyBlockType(BlockType type) {
@@ -72,9 +77,12 @@ inline bool IsSlotOnlyBlockType(BlockType type) {
            type == BlockType::IsKeyDown ||
            type == BlockType::IsTouching ||
            type == BlockType::IsObstacleAhead ||
+           type == BlockType::IsObstacleInDirection ||
            type == BlockType::Ask ||
            type == BlockType::RandomRange ||
-           type == BlockType::Concat;
+           type == BlockType::Concat ||
+           type == BlockType::IsGrounded ||
+           type == BlockType::IsObstacleInDirection;
 }
 
 enum class SlotType {
@@ -241,7 +249,10 @@ private:
     void UpdateSnapping();
     void UpdateSlotTargeting();
     void UpdateDeletion();
-    
+    void UpdateDuplication();
+
+    Block* CloneBlock(Block* source);
+
     void CommitState();
     void Undo();
     void Redo();

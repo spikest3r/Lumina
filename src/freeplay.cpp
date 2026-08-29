@@ -1468,7 +1468,8 @@ void FreeplayScene::openPropertiesPanel(Tile* object) {
         closePropertiesPanel();
     }
 
-    auto data = getObjectData(object->type);
+    auto obj = levelState.GetObject(object->id);
+    auto data = getObjectData(object->type, obj->texture);
     propertiesObjectTexture = data.texture;
 
     propertiesObject = object;

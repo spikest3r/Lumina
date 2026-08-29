@@ -52,6 +52,20 @@ void UpdateWait(WaitState& state, Engine* engine);
 Vector3 QuatToEuler(const Quaternion& q);
 Quaternion EulerToQuat(const Vector3& e);
 
+enum class CameraMovementAxis {
+    Forward,
+    Backward,
+    StrafeLeft,
+    StrafeRight
+};
+
+// Computes a normalized horizontal (XY-plane) direction vector for the given
+// camera yaw (degrees) and movement axis. Only yaw is considered; camera
+// pitch/roll and any puppet rotation have no bearing on the result. This is
+// intentionally decoupled from the VM/blocks so input handlers (e.g. a future
+// WASD controller) can call it directly every frame.
+Vector3 GetCameraRelativeDirection(float cameraYawDegrees, CameraMovementAxis axis);
+
 std::optional<KeyCode> KeyCodeFromString(const std::string& name);
 
 std::optional<float> ToFloat(const std::string& str);

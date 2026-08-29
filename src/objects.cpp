@@ -17,6 +17,7 @@ void InteractiveObject::resetVM() {
     vm.suspended = false;
 
     goToState = {};
+    verticalVelocity = 0.0f;
 }
 
 VMState InteractiveObject::stepVM() {

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <algorithm>
 #include <optional>
+#include <format>
 
 enum class ValueType {
     TAG_STRING,
@@ -146,6 +147,16 @@ ExprResult getFieldValue(const BlockInfo& parentBlock, int fieldID, CodeGenData&
             case BlockType::IsObstacleAhead: {
                 stream << "isObstacleAhead &flagObstacleAhead" << idStr << "\n";
                 return {"flagObstacleAhead" + idStr + " == 1", ExprType::Boolean};
+            }
+            case BlockType::IsObstacleInDirection: {
+                auto dirRes = std::format("\'{}\'", pb.fields[0].text);
+                if (data.hasError) return {"", ExprType::Unknown};
+                stream << "isObstacleInDirection " << dirRes << ", &flagObstacleInDirection" << idStr << "\n";
+                return {"flagObstacleInDirection" + idStr + " == 1", ExprType::Boolean};
+            }
+            case BlockType::IsGrounded: {
+                stream << "isGrounded &flagIsGrounded" << idStr << "\n";
+                return {"flagIsGrounded" + idStr + " == 1", ExprType::Boolean};
             }
             case BlockType::IsTouching: {
                 auto objRes = getFieldValue(pb, 0, data);
@@ -297,6 +308,23 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                     return;
                 }
                 ss << "upwardForce " << res.code << "\n";
+                break;
+            }
+        case BlockType::MoveCameraRelative:
+            {
+                auto axis = getFieldValue(b, 0, codeGenData);
+                auto dist = getFieldValue(b, 1, codeGenData);
+                if (codeGenData.hasError) return;
+                if (dist.type == ExprType::String) {
+                    SetError(codeGenData, b.id, "MoveCameraRelative requires a numeric distance");
+                    return;
+                }
+                ss << "moveCameraRelative " << axis.code << ", " << dist.code << "\n";
+                break;
+            }
+        case BlockType::SetPuppetZRotationFromCamera:
+            {
+                ss << "setPuppetZRotationFromCamera\n";
                 break;
             }
         case BlockType::GoToPos:
@@ -506,9 +534,17 @@ void GenerateBlockCode(const BlockInfo& b, CodeGenData& codeGenData) {
                 ss << "stopAll\n";
                 break;
             }
+        case BlockType::Comment: {
+            if(b.fields[0].plugged) {
+                SetError(codeGenData, b.id, "Comments cannot have plugged in blocks!");
+                return;
+            }
+            ss << "# " << b.fields[0].text;
+            break;
         default:
             std::cout << "Unknown\n";
             break;
+        }
     }
 }
 

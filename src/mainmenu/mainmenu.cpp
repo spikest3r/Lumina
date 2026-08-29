@@ -56,7 +56,7 @@ void MainMenuScene::renderMainMenu() {
     if(ToolUI::Button("New project")) {
         loadFreeplay();
     }
-    if(ToolUI::Button("Examples")) {
+    if(ToolUI::Button("Examples & Templates")) {
         examples = true;
     }
     if(ToolUI::Button("Load existing project")) {
@@ -72,12 +72,24 @@ void MainMenuScene::renderMainMenu() {
 }
 
 void MainMenuScene::renderExamples() {
-    ToolUI::Begin("Examples", false, false);
+    ToolUI::Begin("Examples & Templates", false, false);
     if(ToolUI::Button("< Back")) {
         examples = false;
     }
+    ToolUI::Text("Examples");
     if(ToolUI::Button("Collect & Avoid")) {
         loadFreeplay("examples/collector.lumina", true);
+    }
+    if(ToolUI::Button("Simple Parkour")) {
+        loadFreeplay("examples/parkour.lumina", true);
+    }
+    ToolUI::Separator(HORIZONTAL);
+    ToolUI::Text("Templates");
+    if(ToolUI::Button("Basic Movement")) {
+        loadFreeplay("examples/template_movement.lumina", true);
+    }
+    if(ToolUI::Button("Camera-Relative Movement")) {
+        loadFreeplay("examples/template_camera_movement.lumina", true);
     }
     ToolUI::End();
 }

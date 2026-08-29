@@ -171,6 +171,26 @@ Vector3 QuatToEuler(const Quaternion& q) {
     return e;
 }
 
+Vector3 GetCameraRelativeDirection(float cameraYawDegrees, CameraMovementAxis axis) {
+    constexpr float DEG_TO_RAD = 3.14159265358979323846f / 180.0f;
+    float yaw = cameraYawDegrees * DEG_TO_RAD;
+
+    Vector3 forward = { cosf(yaw), sinf(yaw), 0.0f };
+    Vector3 right   = { sinf(yaw), -cosf(yaw), 0.0f };
+
+    switch (axis) {
+        case CameraMovementAxis::Forward:
+            return forward;
+        case CameraMovementAxis::Backward:
+            return { -forward.x, -forward.y, 0.0f };
+        case CameraMovementAxis::StrafeRight:
+            return right;
+        case CameraMovementAxis::StrafeLeft:
+            return { -right.x, -right.y, 0.0f };
+    }
+    return { 0.0f, 0.0f, 0.0f };
+}
+
 inline const std::unordered_map<std::string, KeyCode>& keyNameMap() {
     static const std::unordered_map<std::string, KeyCode> map = {
         {"Space", KeyCode::Space},

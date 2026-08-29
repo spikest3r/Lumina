@@ -604,4 +604,70 @@ std::unordered_map<int, NativeFn> funcMap = {
         float force = getNumeric(vm.stack.back()); vm.stack.pop_back();
         vm.self->verticalVelocity += force;
     }},
+    {0xC5, [](VMExecutionData& vm) {
+        // isGrounded &flag
+        auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        vm.variables[varIndex].type = TAG_INT;
+
+        Vector3 origin = vm.self->transform.position;
+        Vector3 down = { 0.0f, 0.0f, -1.0f };
+
+        RaycastHit hit = vm.self->engPtr->raycast(origin, down, 0.5f);
+
+        bool grounded = (hit.object != nullptr && hit.object != vm.self);
+
+        vm.variables[varIndex].data = grounded ? 1 : 0;
+    }},
+    {0xC6, [](VMExecutionData& vm) {
+        // moveCameraRelative 'axis', distance
+        float dist = getNumeric(vm.stack.back()); vm.stack.pop_back();
+        auto axisStr = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
+
+        CameraMovementAxis axis = CameraMovementAxis::Forward;
+        if (axisStr == "backward") axis = CameraMovementAxis::Backward;
+        else if (axisStr == "left") axis = CameraMovementAxis::StrafeLeft;
+        else if (axisStr == "right") axis = CameraMovementAxis::StrafeRight;
+
+        float cameraYaw = vm.self->engPtr->cameraRotation.y;
+        Vector3 dir = GetCameraRelativeDirection(cameraYaw, axis);
+
+        vm.self->transform.position.x += dir.x * dist;
+        vm.self->transform.position.y += dir.y * dist;
+    }},
+    {0xC7, [](VMExecutionData& vm) {
+        // setPuppetZRotationFromCamera
+        constexpr float DEG_TO_RAD = 3.14159265358979323846f / 180.0f;
+
+        float cameraYaw = vm.self->engPtr->cameraRotation.y;
+
+        // Camera yaw 0 points along +X ((cos,sin) of yaw, see ComputeOrbitCamera),
+        // while a puppet's Z rotation of 0 faces -Y (see moveForward's forward
+        // vector: (sin z, -cos z)) — a fixed 90 degree offset between the two
+        // yaw-to-direction conventions, so it must be added here to align facing.
+        Vector3 rotation = QuatToEuler(vm.self->transform.rotation);
+        rotation.z = (cameraYaw + 90.0f) * DEG_TO_RAD;
+
+        vm.self->transform.rotation = EulerToQuat(rotation);
+    }},
+    {0xC8, [](VMExecutionData& vm) {
+        // isObstacleInDirection 'direction', &flag
+        auto varIndex = getInt(vm.stack.back()); vm.stack.pop_back();
+        auto dirStr = std::get<std::string>(vm.stack.back().data); vm.stack.pop_back();
+        vm.variables[varIndex].type = TAG_INT;
+
+        CameraMovementAxis axis = CameraMovementAxis::Forward;
+        if (dirStr == "backward") axis = CameraMovementAxis::Backward;
+        else if (dirStr == "left") axis = CameraMovementAxis::StrafeLeft;
+        else if (dirStr == "right") axis = CameraMovementAxis::StrafeRight;
+
+        float cameraYaw = vm.self->engPtr->cameraRotation.y;
+        Vector3 dir = GetCameraRelativeDirection(cameraYaw, axis);
+
+        RaycastHit hit = vm.self->engPtr->raycast(
+            vm.self->transform.position, dir, 0.5f
+        );
+
+        bool blocked = hit.object != nullptr && hit.object != vm.self;
+        vm.variables[varIndex].data = blocked ? 1 : 0;
+    }},
 };

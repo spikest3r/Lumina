@@ -158,7 +158,7 @@ void LevelState::Load(const std::string& path) {
         cameraFollow = false;
         followObject.clear();
         rotationAllowed = true;
-        defaultRotation = {0.0f, 0.0f, 0.0f};
+        defaultRotation = {-25.0f, 135.0f, 0.0f};
     }
 
     isModified = false;

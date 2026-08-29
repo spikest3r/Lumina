@@ -66,7 +66,7 @@ struct ParsedBlock {
 
 bool IsKnownBlockTypeValue(uint32_t v) {
     return v >= static_cast<uint32_t>(BlockType::HeadBlock) &&
-           v <= static_cast<uint32_t>(BlockType::UpwardForce);
+           v <= static_cast<uint32_t>(BlockType::Comment);
 }
 
 bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
@@ -95,7 +95,9 @@ bool IsSlotCompatible(BlockType blockType, SlotType slotType) {
                           blockType == BlockType::LogicNot ||
                           blockType == BlockType::IsKeyDown ||
                           blockType == BlockType::IsTouching ||
-                          blockType == BlockType::IsObstacleAhead);
+                          blockType == BlockType::IsObstacleAhead ||
+                          blockType == BlockType::IsObstacleInDirection ||
+                          blockType == BlockType::IsGrounded);
 
     if (slotType == SlotType::Text) return isTextSource;
     if (slotType == SlotType::Number) return isNumberSource;
@@ -327,6 +329,10 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::ExecuteRoutine, "Execute Routine", IM_COL32(220, 160, 40, 255),
                            { SlotTemplate{ "name", "my_routine", SlotType::Text } } });
 
+    m_palette.push_back({ BlockType::Comment, "Comment", IM_COL32(90, 140, 210, 255), {
+        SlotTemplate{ "comment", "my comment", SlotType::Text }
+     } });
+
     m_palette.push_back({ BlockType::MoveForward, "Move Forward", IM_COL32(90, 140, 210, 255),
                            { SlotTemplate{ "value", "5", SlotType::Number } } });
 
@@ -351,8 +357,13 @@ void BlockEditor::InitPalette() {
     m_palette.push_back({ BlockType::SetRot, "Set Rotation", IM_COL32(90, 140, 210, 255),
                            { SlotTemplate{ "X", "0", SlotType::Number }, SlotTemplate{ "Y", "0", SlotType::Number }, SlotTemplate{ "Z", "0", SlotType::Number } } });
 
-    m_palette.push_back({ BlockType::UpwardForce, "Upward Force", IM_COL32(90, 140, 210, 255), 
+    m_palette.push_back({ BlockType::UpwardForce, "Upward Force", IM_COL32(90, 140, 210, 255),
                             { SlotTemplate{ "force", "0", SlotType::Number}}});
+
+    m_palette.push_back({ BlockType::MoveCameraRelative, "Move Camera Relative", IM_COL32(90, 140, 210, 255),
+                           { SlotTemplate{ "axis", "forward", SlotType::Text }, SlotTemplate{ "value", "5", SlotType::Number } } });
+
+    m_palette.push_back({ BlockType::SetPuppetZRotationFromCamera, "Set Puppet Z Rotation From Camera", IM_COL32(90, 140, 210, 255), { } });
 
     m_palette.push_back({ BlockType::WaitUntilGround, "Wait Until Ground", IM_COL32(90, 140, 210, 255), { } });
     
@@ -402,10 +413,13 @@ void BlockEditor::InitPalette() {
                         { SlotTemplate{"condition", "1", SlotType::Logic} }, 1, {""} });
 
     ImU32 sensorColor = IM_COL32(255, 180, 120, 255);
-    m_palette.push_back({ BlockType::IsKeyDown, "Is Key Down", sensorColor, 
+    m_palette.push_back({ BlockType::IsKeyDown, "Is Key Down", sensorColor,
         { SlotTemplate{"Key", "W", SlotType::Text} } });
     m_palette.push_back({ BlockType::IsObstacleAhead, "Is Obstacle Ahead", sensorColor, {  } });
-    m_palette.push_back({ BlockType::IsTouching, "Is Touching", sensorColor, 
+    m_palette.push_back({ BlockType::IsObstacleInDirection, "Is Obstacle In Direction", sensorColor,
+        { SlotTemplate{"direction", "forward", SlotType::Text} } });
+    m_palette.push_back({ BlockType::IsGrounded, "Is Grounded", sensorColor, {  } });
+    m_palette.push_back({ BlockType::IsTouching, "Is Touching", sensorColor,
         { SlotTemplate{"Object", "name", SlotType::Text} } });
 
     ImU32 mathColor = IM_COL32(80, 180, 120, 255);
@@ -532,7 +546,8 @@ void BlockEditor::Update() {
     UpdateSlotTargeting();
     UpdateDragExistingBlock();
     UpdateDeletion();
-    UpdateLayouts(); 
+    UpdateDuplication();
+    UpdateLayouts();
 }
 
 void BlockEditor::UpdateDragExistingBlock() {
@@ -719,6 +734,84 @@ void BlockEditor::UpdateDeletion() {
         DeleteBlock(toDelete);
         CommitState();
     }
+}
+
+void BlockEditor::UpdateDuplication() {
+    if (!ImGui::GetIO().KeyCtrl) return;
+    if (!ImGui::IsKeyPressed(ImGuiKey_D)) return;
+    if (!m_hoveredBlock || m_hoveredBlock->IsMainHead()) return;
+
+    Block* cloned = CloneBlock(m_hoveredBlock);
+    if (cloned) {
+        cloned->pos = ImVec2(m_hoveredBlock->pos.x + 40.0f, m_hoveredBlock->pos.y + 40.0f);
+        CommitState();
+    }
+}
+
+Block* BlockEditor::CloneBlock(Block* source) {
+    if (!source) return nullptr;
+
+    m_blocks.push_back(std::make_unique<Block>());
+    Block* clone = m_blocks.back().get();
+
+    clone->id = NextId();
+    clone->type = source->type;
+    clone->label = source->label;
+    clone->pos = source->pos;
+    clone->size = source->size;
+    clone->hasError = false;
+
+    clone->slots.reserve(source->slots.size());
+    for (size_t i = 0; i < source->slots.size(); ++i) {
+        const auto& srcSlot = source->slots[i];
+        Slot slot;
+        slot.name = srcSlot.name;
+        slot.text = srcSlot.text;
+        slot.allowedType = srcSlot.allowedType;
+
+        if (srcSlot.plugged) {
+            slot.plugged = CloneBlock(srcSlot.plugged);
+            if (slot.plugged) {
+                slot.plugged->slotParent = clone;
+                slot.plugged->slotParentIndex = static_cast<int>(i);
+            }
+        }
+
+        clone->slots.push_back(std::move(slot));
+    }
+
+    clone->subStacks.resize(source->subStacks.size(), nullptr);
+    clone->subStackLabels = source->subStackLabels;
+
+    for (size_t i = 0; i < source->subStacks.size(); ++i) {
+        if (!source->subStacks[i]) continue;
+
+        Block* clonedChainStart = nullptr;
+        Block* clonedChainLast = nullptr;
+
+        for (Block* srcChainBlock = source->subStacks[i]; srcChainBlock; srcChainBlock = srcChainBlock->next) {
+            Block* clonedChainBlock = CloneBlock(srcChainBlock);
+            if (!clonedChainBlock) continue;
+
+            clonedChainBlock->parentSubStack = clone;
+            clonedChainBlock->parentSubStackIndex = static_cast<int>(i);
+
+            if (!clonedChainStart) {
+                clonedChainStart = clonedChainBlock;
+            } else {
+                clonedChainLast->next = clonedChainBlock;
+                clonedChainBlock->prev = clonedChainLast;
+            }
+            clonedChainLast = clonedChainBlock;
+        }
+
+        if (clonedChainStart) {
+            clone->subStacks[i] = clonedChainStart;
+        }
+    }
+
+    LayoutBlock(clone);
+    return clone;
 }
 
 void BlockEditor::DetachFromChain(Block* block) {
