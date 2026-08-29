@@ -60,6 +60,10 @@ Resume your last project:
 
 ## Getting Started
 
+Alternatively, you can download Lumina on [SourceForge](https://sourceforge.net/projects/lumina-editor/) or from AUR on Arch Linux.
+
+On Arch Linux `yay -S lumina-editor-git`.
+
 When you launch Lumina, you'll see the main menu where you can:
 
 - **Create a new project** – Start with a blank canvas
