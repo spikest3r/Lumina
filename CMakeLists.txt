@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LumenCreator LANGUAGES CXX)
+project(lumina LANGUAGES CXX)
 
 # 1. C++ Standard
 set(CMAKE_CXX_STANDARD 20)
@@ -15,10 +15,10 @@ file(GLOB_RECURSE LUMENCREATOR_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
 
-add_executable(LumenCreator ${LUMENCREATOR_SOURCES})
+add_executable(lumina ${LUMENCREATOR_SOURCES})
 
 # 4. Include Directories
-target_include_directories(LumenCreator PRIVATE
+target_include_directories(lumina PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -33,14 +33,14 @@ set_target_properties(VulkanEngine PROPERTIES
 )
 
 # 6. Linking
-target_link_libraries(LumenCreator PRIVATE
+target_link_libraries(lumina PRIVATE
     VulkanEngine
     glfw
     Vulkan::Vulkan
 )
 
 # 7. RPATH so it finds the .so without LD_LIBRARY_PATH
-set_target_properties(LumenCreator PROPERTIES
+set_target_properties(lumina PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE
     INSTALL_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/external"
 )
