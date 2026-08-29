@@ -139,8 +139,8 @@ void FreeplayScene::InitScene(Engine* engine) {
         codeModeSwitch = levelState.codeMode;
         instantiateLevel(engine);
         
-        if(projectFile == "temporary.lumina") {
-            DeleteFileAsync("temporary.lumina");
+        if(projectFile == getTemporaryProjectPath()) {
+            DeleteFileAsync(getTemporaryProjectPath());
             showDialog("Previous session", "Your previous session has been auto-saved.\nDon't forget to save your projects!", nullptr);
             chosenFile = false;
             levelState.SetModified();
@@ -157,7 +157,7 @@ void FreeplayScene::InitScene(Engine* engine) {
     });
 
     if(!chosenFile) {
-        projectFile = "temporary.lumina";
+        projectFile = getTemporaryProjectPath();
     }
 
     autosaveTime = autosaveInterval;
@@ -1178,8 +1178,8 @@ void FreeplayScene::UpdateScene(Engine* engine) {
 
 void FreeplayScene::DestroyScene(Engine* engine) {
     if(chosenFile) {
-        std::ofstream("last") << projectFile;
-        DeleteFileAsync("temporary.lumina");
+        std::ofstream(getLastProjectPath()) << projectFile;
+        DeleteFileAsync(getTemporaryProjectPath());
     } else if(!dropFile) {
         SaveProject();
     }

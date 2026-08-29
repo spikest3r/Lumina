@@ -4,7 +4,13 @@
 #include <gameobject.h>
 #include <engine_types.h>
 #include <optional>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 enum class GoToPosResult { Reached, Blocked };
 
@@ -71,3 +77,8 @@ std::optional<KeyCode> KeyCodeFromString(const std::string& name);
 std::optional<float> ToFloat(const std::string& str);
 
 void DeleteFileAsync(const std::string& filePath);
+
+fs::path getUserDataDirectory();
+fs::path getTemporaryProjectPath();
+fs::path getLastProjectPath();
+bool readFileToString(const fs::path& path, std::string& output);

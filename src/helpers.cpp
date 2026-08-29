@@ -282,3 +282,57 @@ void DeleteFileAsync(const std::string& filePath) {
         }
     }).detach();
 }
+
+fs::path getUserDataDirectory() {
+#ifdef _WIN32
+    const char* appData = std::getenv("APPDATA");
+
+    if (appData) {
+        return fs::path(appData) / "Lumina";
+    }
+
+    const char* userProfile = std::getenv("USERPROFILE");
+
+    if (userProfile) {
+        return fs::path(userProfile) / "AppData" / "Roaming" / "Lumina";
+    }
+
+    return fs::path("Lumina");
+#else
+    const char* xdgDataHome = std::getenv("XDG_DATA_HOME");
+
+    if (xdgDataHome && *xdgDataHome) {
+        return fs::path(xdgDataHome) / "lumina";
+    }
+
+    const char* home = std::getenv("HOME");
+
+    if (home && *home) {
+        return fs::path(home) / ".local" / "share" / "lumina";
+    }
+
+    return fs::path(".lumina");
+#endif
+}
+
+fs::path getTemporaryProjectPath() {
+    return getUserDataDirectory() / "temporary.lumina";
+}
+
+fs::path getLastProjectPath() {
+    return getUserDataDirectory() / "last";
+}
+
+bool readFileToString(const fs::path& path, std::string& output) {
+    std::ifstream file(path);
+
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    output = buffer.str();
+
+    return true;
+}
